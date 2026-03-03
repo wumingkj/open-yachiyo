@@ -944,6 +944,43 @@ async function patchRenderedMessageMarkdown(messageId, text) {
   return true;
 }
 
+function appendStreamingDelta({ sessionId, delta, source = 'delta', seq = null }) {
+  if (!state.pending) return;
+  if (sessionId && sessionId !== state.pending.sessionId) return;
+
+  const textDelta = String(delta || '');
+  if (!textDelta) return;
+
+  const selectedSource = state.pending.streamSource || null;
+  if (selectedSource && selectedSource !== source) return;
+  if (!selectedSource) {
+    state.pending.streamSource = source;
+  }
+
+  if (source === 'runtime.event') {
+    const numericSeq = Number(seq);
+    if (Number.isFinite(numericSeq)) {
+      const lastSeq = Number(state.pending.lastRuntimeDeltaSeq || 0);
+      if (numericSeq <= lastSeq) return;
+      state.pending.lastRuntimeDeltaSeq = numericSeq;
+    }
+  }
+
+  const pendingSession = resolvePendingSession();
+  if (!pendingSession) return;
+
+  state.pending.streamOutput = `${state.pending.streamOutput || ''}${textDelta}`;
+  const currentText = state.pending.streamOutput;
+  updateMessage(pendingSession, state.pending.assistantMsgId, { content: currentText });
+
+  if (!patchRenderedMessageText(state.pending.assistantMsgId, currentText)) {
+    render();
+    setTimeout(() => {
+      patchRenderedMessageText(state.pending?.assistantMsgId || null, state.pending?.streamOutput || '');
+    }, 0);
+  }
+}
+
 function renderHeader() {
   const session = getActiveSession();
   elements.activeSessionName.textContent = session?.name || 'New chat';
@@ -1037,6 +1074,16 @@ function connectWs() {
         session_id: msg.data?.session_id || null
       });
       if (msg.data?.session_id && msg.data.session_id !== state.pending.sessionId) return;
+      if (msg.data?.event === 'llm.stream.delta') {
+        appendStreamingDelta({
+          sessionId: msg.data?.session_id || state.pending.sessionId,
+          delta: msg.data?.payload?.delta || '',
+          source: 'runtime.event',
+          seq: msg.data?.seq
+        });
+        setStatus('Streaming...');
+        return;
+      }
       if (msg.data?.event === 'tool.call') {
         setStatus(`Running tool: ${msg.data.payload?.name || 'unknown'}`);
       }
@@ -1044,16 +1091,11 @@ function connectWs() {
     }
 
     if (msg.type === 'delta') {
-      if (msg.session_id && msg.session_id !== state.pending.sessionId) return;
-      const pendingSession = resolvePendingSession();
-      if (!pendingSession) return;
-      const delta = String(msg.delta || '');
-      if (!delta) return;
-      state.pending.streamOutput = `${state.pending.streamOutput || ''}${delta}`;
-      updateMessage(pendingSession, state.pending.assistantMsgId, {
-        content: state.pending.streamOutput
+      appendStreamingDelta({
+        sessionId: msg.session_id || state.pending.sessionId,
+        delta: msg.delta || '',
+        source: 'delta'
       });
-      patchRenderedMessageText(state.pending.assistantMsgId, state.pending.streamOutput);
       setStatus('Streaming...');
       return;
     }
@@ -1123,7 +1165,9 @@ function sendMessage() {
     sessionId: session.id,
     userMsgId: userMsg.id,
     assistantMsgId: assistantMsg.id,
-    streamOutput: ''
+    streamOutput: '',
+    streamSource: null,
+    lastRuntimeDeltaSeq: 0
   };
 
   elements.chatInput.value = '';
