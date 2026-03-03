@@ -176,7 +176,11 @@ const runner = new ToolLoopRunner({
   toolEarlyDispatch: parseBooleanEnv('RUNTIME_TOOL_EARLY_DISPATCH', false)
 });
 
-const dispatcher = new ToolCallDispatcher({ bus, executor });
+const dispatcher = new ToolCallDispatcher({
+  bus,
+  executor,
+  dedupTtlMs: Math.max(1000, Number(process.env.RUNTIME_TOOL_CALL_DEDUP_TTL_MS) || 5 * 60 * 1000)
+});
 dispatcher.start();
 
 const worker = new RuntimeRpcWorker({ queue, runner, bus });
@@ -229,7 +233,8 @@ app.get('/health', async (_, res) => {
     runtime: {
       streaming_enabled: runner.runtimeStreamingEnabled,
       tool_async_mode: runner.toolAsyncMode,
-      tool_early_dispatch: runner.toolEarlyDispatch
+      tool_early_dispatch: runner.toolEarlyDispatch,
+      tool_call_dedup_ttl_ms: dispatcher.dedupTtlMs
     },
     llm: llmManager.getConfigSummary(),
     tools: toolConfigManager.getSummary(),
