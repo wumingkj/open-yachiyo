@@ -8,6 +8,7 @@ const SERVER_SYNC_INTERVAL_MS = 2000;
 const MAX_UPLOAD_IMAGES = 4;
 const MAX_UPLOAD_IMAGE_BYTES = 8 * 1024 * 1024;
 const LIGHTBOX_ANIMATION_MS = 220;
+const STREAM_CHUNK_FLUSH_MS = 120;
 const DEBUG_PREFS_KEY = 'yachiyo_debug_panel_v1';
 const DEBUG_MAX_LINES = 500;
 
@@ -944,10 +945,67 @@ function patchRenderedMessageText(messageId, text) {
 async function patchRenderedMessageMarkdown(messageId, text) {
   const body = findRenderedMessageBody(messageId);
   if (!body) return false;
+  body.classList.remove('stream-reveal');
+  delete body.dataset.streamReveal;
   body.innerHTML = await renderMarkdownWithMermaid(String(text || ''));
   await renderMermaidDiagrams(body);
   elements.messageList.scrollTop = elements.messageList.scrollHeight;
   return true;
+}
+
+function ensureStreamingBody(messageId) {
+  const body = findRenderedMessageBody(messageId);
+  if (!body) return null;
+  if (body.dataset.streamReveal !== '1') {
+    body.textContent = '';
+    body.dataset.streamReveal = '1';
+    body.classList.add('stream-reveal');
+  }
+  return body;
+}
+
+function appendRenderedStreamingChunk(messageId, chunkText) {
+  const body = ensureStreamingBody(messageId);
+  if (!body) return false;
+  const span = document.createElement('span');
+  span.className = 'stream-reveal-chunk';
+  span.textContent = String(chunkText || '');
+  body.appendChild(span);
+  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  return true;
+}
+
+function flushPendingStreamChunk(pendingRef = state.pending) {
+  if (!pendingRef) return;
+  if (pendingRef.flushTimer) {
+    clearTimeout(pendingRef.flushTimer);
+    pendingRef.flushTimer = null;
+  }
+
+  const chunk = String(pendingRef.stagedDelta || '');
+  if (!chunk) return;
+  pendingRef.stagedDelta = '';
+
+  const ok = appendRenderedStreamingChunk(pendingRef.assistantMsgId, chunk);
+  if (!ok) {
+    const patched = patchRenderedMessageText(pendingRef.assistantMsgId, pendingRef.streamOutput || '');
+    if (!patched) {
+      render();
+      setTimeout(() => {
+        patchRenderedMessageText(pendingRef.assistantMsgId, pendingRef.streamOutput || '');
+      }, 0);
+    }
+  }
+
+  const c = Number(pendingRef.deltaCount || 0);
+  if (c === 1 || c % 20 === 0) {
+    emitClientDebug('chain.webui.stream.patched', 'webui applied stream patch', {
+      session_id: pendingRef.sessionId || null,
+      delta_count: c,
+      output_chars: String(pendingRef.streamOutput || '').length,
+      stream_source: pendingRef.streamSource || null
+    });
+  }
 }
 
 function appendStreamingDelta({ sessionId, delta, source = 'delta', seq = null }) {
@@ -977,6 +1035,7 @@ function appendStreamingDelta({ sessionId, delta, source = 'delta', seq = null }
 
   state.pending.streamOutput = `${state.pending.streamOutput || ''}${textDelta}`;
   state.pending.deltaCount = Number(state.pending.deltaCount || 0) + 1;
+  state.pending.stagedDelta = `${state.pending.stagedDelta || ''}${textDelta}`;
   updateMessage(
     pendingSession,
     state.pending.assistantMsgId,
@@ -984,29 +1043,13 @@ function appendStreamingDelta({ sessionId, delta, source = 'delta', seq = null }
     { persist: false, bumpUpdatedAt: false }
   );
 
-  if (!state.pending.renderScheduled) {
-    state.pending.renderScheduled = true;
-    requestAnimationFrame(() => {
+  if (!state.pending.flushTimer) {
+    const flushDelay = state.pending.deltaCount === 1 ? 20 : STREAM_CHUNK_FLUSH_MS;
+    state.pending.flushTimer = setTimeout(() => {
       if (!state.pending) return;
-      state.pending.renderScheduled = false;
-      const ok = patchRenderedMessageText(state.pending.assistantMsgId, state.pending.streamOutput);
-      if (!ok) {
-        render();
-        setTimeout(() => {
-          patchRenderedMessageText(state.pending?.assistantMsgId || null, state.pending?.streamOutput || '');
-        }, 0);
-      }
-
-      const c = Number(state.pending?.deltaCount || 0);
-      if (c === 1 || c % 20 === 0) {
-        emitClientDebug('chain.webui.stream.patched', 'webui applied stream patch', {
-          session_id: state.pending?.sessionId || null,
-          delta_count: c,
-          output_chars: String(state.pending?.streamOutput || '').length,
-          stream_source: state.pending?.streamSource || null
-        });
-      }
-    });
+      state.pending.flushTimer = null;
+      flushPendingStreamChunk(state.pending);
+    }, flushDelay);
   }
 
   const count = Number(state.pending.deltaCount || 0);
@@ -1117,12 +1160,16 @@ function resolvePendingSession() {
 }
 
 function finishPendingResponse({ content, statusText }) {
+  const pendingRef = state.pending;
+  if (!pendingRef) return;
+
   const pendingSession = resolvePendingSession();
-  const assistantMsgId = state.pending?.assistantMsgId || null;
-  const deltaCount = Number(state.pending?.deltaCount || 0);
-  const streamSource = state.pending?.streamSource || null;
+  const assistantMsgId = pendingRef.assistantMsgId || null;
+  const deltaCount = Number(pendingRef.deltaCount || 0);
+  const streamSource = pendingRef.streamSource || null;
+  flushPendingStreamChunk(pendingRef);
   if (pendingSession) {
-    updateMessage(pendingSession, state.pending.assistantMsgId, { content: String(content || '') });
+    updateMessage(pendingSession, pendingRef.assistantMsgId, { content: String(content || '') });
   }
 
   state.pending = null;
@@ -1272,9 +1319,10 @@ function sendMessage() {
     userMsgId: userMsg.id,
     assistantMsgId: assistantMsg.id,
     streamOutput: '',
+    stagedDelta: '',
+    flushTimer: null,
     streamSource: null,
     lastRuntimeDeltaSeq: 0,
-    renderScheduled: false,
     deltaCount: 0
   };
 
