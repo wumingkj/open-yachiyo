@@ -51,6 +51,7 @@ const BUBBLE_LINE_HEIGHT_RATIO = 1.45;
 const BUBBLE_PADDING_HORIZONTAL_PX = 14;
 const BUBBLE_PADDING_VERTICAL_PX = 10;
 const BUBBLE_MIN_TEXT_UNITS_PER_LINE = 12;
+const BUBBLE_UNFILLED_DRAIN_DELAY_MS = 3000;
 
 function normalizeLive2dPresetConfig(config = {}) {
   const safe = config && typeof config === 'object' && !Array.isArray(config) ? config : {};
@@ -1802,7 +1803,6 @@ async function startDesktopSuite({
       ? Math.max(500, Math.min(30000, Number(params.durationMs)))
       : 5000;
     const streaming = Boolean(params?.streaming);
-
     bubbleState.visible = true;
     bubbleState.text = text;
     bubbleState.lines = normalizedLines;
@@ -1840,6 +1840,9 @@ async function startDesktopSuite({
     avgLaunchIntervalMs: 0,
     launchTimer: null,
     drainTimer: null,
+    drainDelayTimer: null,
+    drainDelayApplied: false,
+    everFilledCapacity: false,
     streamEnded: false,
     displayedSentences: 0,
     nextSentenceId: 1
@@ -2025,6 +2028,10 @@ async function startDesktopSuite({
       clearInterval(streamingState.drainTimer);
       streamingState.drainTimer = null;
     }
+    if (streamingState.drainDelayTimer) {
+      clearTimeout(streamingState.drainDelayTimer);
+      streamingState.drainDelayTimer = null;
+    }
 
     streamingState.active = false;
     streamingState.receivedText = '';
@@ -2034,6 +2041,8 @@ async function startDesktopSuite({
     streamingState.lastUpdateTime = 0;
     streamingState.lastLaunchAtMs = 0;
     streamingState.avgLaunchIntervalMs = 0;
+    streamingState.drainDelayApplied = false;
+    streamingState.everFilledCapacity = false;
     streamingState.streamEnded = false;
     streamingState.displayedSentences = 0;
     streamingState.nextSentenceId = 1;
@@ -2051,6 +2060,29 @@ async function startDesktopSuite({
       return;
     }
     if (streamingState.drainTimer) {
+      return;
+    }
+    const visibleCapacity = getBubbleVisibleLineCapacity();
+    const shouldDelayForUnfilledWindow = !streamingState.everFilledCapacity
+      && streamingState.displayedSentences > 0
+      && streamingState.displayedSentences < visibleCapacity;
+
+    if (shouldDelayForUnfilledWindow && !streamingState.drainDelayApplied) {
+      streamingState.drainDelayApplied = true;
+      streamingState.drainDelayTimer = setTimeout(() => {
+        streamingState.drainDelayTimer = null;
+        ensureStreamingDrainTimer();
+      }, BUBBLE_UNFILLED_DRAIN_DELAY_MS);
+      emitDesktopDebug('chain.electron.bubble.streaming_drain_delayed', 'bubble streaming drain delayed for unfilled window', {
+        session_id: streamingState.sessionId,
+        trace_id: streamingState.traceId,
+        displayed_sentences: streamingState.displayedSentences,
+        visible_capacity: visibleCapacity,
+        delay_ms: BUBBLE_UNFILLED_DRAIN_DELAY_MS
+      });
+      return;
+    }
+    if (streamingState.drainDelayTimer) {
       return;
     }
     const fallbackStepMs = Math.max(
@@ -2124,6 +2156,9 @@ async function startDesktopSuite({
     streamingState.lastLaunchAtMs = launchedAt;
     streamingState.visibleItems.push(item);
     streamingState.displayedSentences += 1;
+    if (streamingState.displayedSentences >= maxVisibleLines) {
+      streamingState.everFilledCapacity = true;
+    }
     // Render once per launch cycle to avoid visual jitter.
     renderStreamingBubble();
     emitDesktopDebug('chain.electron.bubble.streaming_sentence', 'bubble streaming sentence rendered', {
@@ -2167,6 +2202,10 @@ async function startDesktopSuite({
       clearInterval(streamingState.drainTimer);
       streamingState.drainTimer = null;
     }
+    if (streamingState.drainDelayTimer) {
+      clearTimeout(streamingState.drainDelayTimer);
+      streamingState.drainDelayTimer = null;
+    }
 
     const payload = {
       session_id: streamingState.sessionId,
@@ -2184,6 +2223,8 @@ async function startDesktopSuite({
     streamingState.lastUpdateTime = 0;
     streamingState.lastLaunchAtMs = 0;
     streamingState.avgLaunchIntervalMs = 0;
+    streamingState.drainDelayApplied = false;
+    streamingState.everFilledCapacity = false;
     streamingState.streamEnded = false;
     streamingState.displayedSentences = 0;
     streamingState.nextSentenceId = 1;
@@ -2216,6 +2257,8 @@ async function startDesktopSuite({
       streamingState.nextSentenceId = 1;
       streamingState.lastLaunchAtMs = 0;
       streamingState.avgLaunchIntervalMs = 0;
+      streamingState.drainDelayApplied = false;
+      streamingState.everFilledCapacity = false;
       emitDesktopDebug('chain.electron.bubble.streaming_started', 'bubble streaming started', {
         session_id: currentSessionId,
         trace_id: currentTraceId
