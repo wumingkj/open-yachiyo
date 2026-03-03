@@ -304,6 +304,81 @@ test('ToolLoopRunner counts parse error once when callback and stream_meta both 
   dispatcher.stop();
 });
 
+test('ToolLoopRunner dispatches stable tool call early when toolEarlyDispatch is enabled', async () => {
+  const bus = new RuntimeEventBus();
+  let toolStartedAt = 0;
+  const executor = new ToolExecutor({
+    slow_tool: {
+      type: 'local',
+      description: 'slow tool',
+      side_effect_level: 'write',
+      requires_lock: true,
+      input_schema: { type: 'object', properties: {}, additionalProperties: false },
+      run: async () => {
+        toolStartedAt = Date.now();
+        await delay(80);
+        return 'slow-result';
+      }
+    }
+  });
+  const dispatcher = new ToolCallDispatcher({ bus, executor });
+  dispatcher.start();
+
+  let streamStep = 0;
+  let stepOneReturnedAt = 0;
+  const reasoner = {
+    async decideStream({ onToolCallStable }) {
+      streamStep += 1;
+      if (streamStep === 1) {
+        onToolCallStable?.({
+          index: 0,
+          call_id: 'early-call-1',
+          name: 'slow_tool',
+          args: {}
+        });
+        await delay(60);
+        stepOneReturnedAt = Date.now();
+        return {
+          type: 'tool',
+          tool: { call_id: 'early-call-1', name: 'slow_tool', args: {} }
+        };
+      }
+      return {
+        type: 'final',
+        output: 'early-dispatch-ok'
+      };
+    }
+  };
+
+  const events = [];
+  const runner = new ToolLoopRunner({
+    bus,
+    getReasoner: () => reasoner,
+    listTools: () => executor.listTools(),
+    maxStep: 4,
+    toolResultTimeoutMs: 3000,
+    runtimeStreamingEnabled: true,
+    toolEarlyDispatch: true
+  });
+
+  const result = await runner.run({
+    sessionId: 's-early-dispatch',
+    input: 'dispatch early',
+    onEvent: (event) => events.push(event)
+  });
+
+  assert.equal(result.state, 'DONE');
+  assert.equal(result.output, 'early-dispatch-ok');
+  assert.equal(toolStartedAt > 0, true);
+  assert.equal(stepOneReturnedAt > 0, true);
+  assert.equal(toolStartedAt < stepOneReturnedAt, true);
+  assert.equal(events.some((evt) => evt.event === 'tool.call.early_dispatched'), true);
+  const toolCallEvents = events.filter((evt) => evt.event === 'tool.call' && evt.payload.call_id === 'early-call-1');
+  assert.equal(toolCallEvents.length, 1);
+
+  dispatcher.stop();
+});
+
 
 
 test('ToolLoopRunner executes multiple tool calls in one step serially', async () => {

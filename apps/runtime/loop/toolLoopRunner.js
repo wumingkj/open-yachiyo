@@ -319,6 +319,95 @@ class ToolLoopRunner {
           messages: ctx.messages.length
         });
 
+        const pendingToolCallPromises = new Map();
+        const pendingToolCallDefs = new Map();
+        const dispatchToolCall = (rawCall, dispatchMode = 'normal') => {
+          const callId = String(rawCall?.call_id || '').trim();
+          const name = String(rawCall?.name || '').trim();
+          if (!callId || !name) {
+            return null;
+          }
+          const normalizedCall = {
+            call_id: callId,
+            name,
+            args: rawCall?.args || {}
+          };
+
+          const existingPromise = pendingToolCallPromises.get(callId);
+          if (existingPromise) {
+            const existingCall = pendingToolCallDefs.get(callId) || {};
+            const argsChanged = JSON.stringify(existingCall.args || {}) !== JSON.stringify(normalizedCall.args || {});
+            const nameChanged = String(existingCall.name || '') !== normalizedCall.name;
+            if (argsChanged || nameChanged) {
+              emit('tool.call.stable_mismatch', {
+                call_id: callId,
+                previous_name: existingCall.name || null,
+                next_name: normalizedCall.name,
+                previous_args: existingCall.args || {},
+                next_args: normalizedCall.args || {},
+                dispatch_mode: dispatchMode
+              });
+            }
+            return existingPromise;
+          }
+
+          const toolCallPayload = {
+            trace_id: traceId,
+            session_id: sessionId,
+            step_index: ctx.stepIndex,
+            call_id: normalizedCall.call_id,
+            workspace_root: runtimeContext.workspace_root || null,
+            permission_level: runtimeContext.permission_level || null,
+            tool: {
+              name: normalizedCall.name,
+              args: normalizedCall.args || {}
+            }
+          };
+
+          emit('tool.call', {
+            call_id: normalizedCall.call_id,
+            name: normalizedCall.name,
+            args: normalizedCall.args || {},
+            dispatch_mode: dispatchMode
+          });
+          if (dispatchMode === 'early') {
+            emit('tool.call.early_dispatched', {
+              call_id: normalizedCall.call_id,
+              name: normalizedCall.name
+            });
+          }
+          publishChainEvent(this.bus, 'loop.tool.requested', {
+            session_id: sessionId,
+            trace_id: traceId,
+            step_index: ctx.stepIndex,
+            call_id: normalizedCall.call_id,
+            tool_name: normalizedCall.name
+          });
+
+          const waitPromise = this.bus.waitFor(
+            'tool.call.result',
+            (payload) => payload.trace_id === traceId && payload.call_id === normalizedCall.call_id,
+            this.toolResultTimeoutMs
+          ).then((toolResult) => ({
+            call: normalizedCall,
+            toolResult,
+            resolved_at_ms: Date.now()
+          }));
+
+          this.bus.publish('tool.call.requested', toolCallPayload);
+          publishChainEvent(this.bus, 'loop.tool.waiting_result', {
+            session_id: sessionId,
+            trace_id: traceId,
+            step_index: ctx.stepIndex,
+            call_id: normalizedCall.call_id,
+            tool_name: normalizedCall.name
+          });
+
+          pendingToolCallDefs.set(callId, normalizedCall);
+          pendingToolCallPromises.set(callId, waitPromise);
+          return waitPromise;
+        };
+
         let decision = null;
         const useStreamingDecision = this.runtimeStreamingEnabled && typeof reasoner.decideStream === 'function';
         if (useStreamingDecision) {
@@ -355,6 +444,20 @@ class ToolLoopRunner {
             onToolCallStable: (stableCall) => {
               markMetricIfUnset('first_tool_stable_ms');
               emit('tool_call.stable', stableCall || {});
+              if (this.toolEarlyDispatch) {
+                const earlyPromise = dispatchToolCall({
+                  call_id: stableCall?.call_id || '',
+                  name: stableCall?.name || '',
+                  args: stableCall?.args || {}
+                }, 'early');
+                if (!earlyPromise) {
+                  emit('tool.call.early_skipped', {
+                    reason: 'missing_call_id_or_name',
+                    call_id: stableCall?.call_id || null,
+                    name: stableCall?.name || null
+                  });
+                }
+              }
             },
             onToolCallParseError: (parseError) => {
               emitParseError(parseError);
@@ -451,59 +554,18 @@ class ToolLoopRunner {
           chunk_width: chunkWidth
         });
 
-        const dispatchAndWait = (call) => {
-          const toolCallPayload = {
-            trace_id: traceId,
-            session_id: sessionId,
-            step_index: ctx.stepIndex,
-            call_id: call.call_id,
-            workspace_root: runtimeContext.workspace_root || null,
-            permission_level: runtimeContext.permission_level || null,
-            tool: {
-              name: call.name,
-              args: call.args || {}
-            }
-          };
-
-          emit('tool.call', {
-            call_id: call.call_id,
-            name: call.name,
-            args: call.args || {}
-          });
-          publishChainEvent(this.bus, 'loop.tool.requested', {
-            session_id: sessionId,
-            trace_id: traceId,
-            step_index: ctx.stepIndex,
-            call_id: call.call_id,
-            tool_name: call.name
-          });
-
-          const waitPromise = this.bus.waitFor(
-            'tool.call.result',
-            (payload) => payload.trace_id === traceId && payload.call_id === call.call_id,
-            this.toolResultTimeoutMs
-          ).then((toolResult) => ({
-            call,
-            toolResult,
-            resolved_at_ms: Date.now()
-          }));
-
-          this.bus.publish('tool.call.requested', toolCallPayload);
-
-          publishChainEvent(this.bus, 'loop.tool.waiting_result', {
-            session_id: sessionId,
-            trace_id: traceId,
-            step_index: ctx.stepIndex,
-            call_id: call.call_id,
-            tool_name: call.name
-          });
-
-          return waitPromise;
-        };
-
         for (let start = 0; start < toolCalls.length; start += chunkWidth) {
           const chunk = toolCalls.slice(start, start + chunkWidth);
-          const chunkResults = await Promise.all(chunk.map((call) => dispatchAndWait(call)));
+          const chunkResults = await Promise.all(chunk.map((call) => {
+            const waitPromise = dispatchToolCall(call, 'normal');
+            if (!waitPromise) {
+              throw new Error(`invalid tool call payload: ${call?.call_id || 'unknown'}`);
+            }
+            return waitPromise.then((payload) => ({
+              requestedCall: call,
+              ...payload
+            }));
+          }));
           const earliestResolvedAtMs = chunkResults.reduce((acc, current) => {
             const ts = Number(current?.resolved_at_ms);
             if (!Number.isFinite(ts)) return acc;
@@ -512,20 +574,26 @@ class ToolLoopRunner {
           }, Number.NaN);
           markMetricAtTimeIfUnset('first_tool_result_ms', earliestResolvedAtMs);
 
-          for (const { call, toolResult } of chunkResults) {
+          for (const { requestedCall, toolResult } of chunkResults) {
+            const effectiveCall = requestedCall || {};
             publishChainEvent(this.bus, 'loop.tool.result_received', {
               session_id: sessionId,
               trace_id: traceId,
               step_index: ctx.stepIndex,
-              call_id: call.call_id,
-              tool_name: call.name,
+              call_id: effectiveCall.call_id,
+              tool_name: effectiveCall.name,
               ok: Boolean(toolResult?.ok),
               code: toolResult?.code || null
             });
 
             if (!toolResult.ok) {
               sm.transition(RuntimeState.ERROR);
-              emit('tool.error', { call_id: call.call_id, error: toolResult.error, name: call.name, code: toolResult.code });
+              emit('tool.error', {
+                call_id: effectiveCall.call_id,
+                error: toolResult.error,
+                name: effectiveCall.name,
+                code: toolResult.code
+              });
               return { output: `工具执行失败：${toolResult.error}`, traceId, state: sm.state };
             }
 
@@ -535,20 +603,20 @@ class ToolLoopRunner {
 
             ctx.messages.push({
               role: 'tool',
-              tool_call_id: call.call_id,
-              name: call.name,
+              tool_call_id: effectiveCall.call_id,
+              name: effectiveCall.name,
               content: String(toolResult.result)
             });
 
             ctx.observations.push({
-              call_id: call.call_id,
-              name: call.name,
+              call_id: effectiveCall.call_id,
+              name: effectiveCall.name,
               result: toolResult.result
             });
 
             emit('tool.result', {
-              call_id: call.call_id,
-              name: call.name,
+              call_id: effectiveCall.call_id,
+              name: effectiveCall.name,
               result: toolResult.result
             });
           }
