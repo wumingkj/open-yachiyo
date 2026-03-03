@@ -194,6 +194,63 @@ test('RuntimeRpcWorker forwards llm.stream.delta and skips duplicated streamed l
   worker.stop();
 });
 
+test('RuntimeRpcWorker forwards tool_call runtime events as tool_call.event', async () => {
+  const queue = new RpcInputQueue();
+  const bus = new RuntimeEventBus();
+
+  const runner = {
+    async run({ onEvent }) {
+      onEvent({
+        event: 'tool_call.delta',
+        payload: { call_id: 'call-1', name: 'add', args_raw: '{"a":1' },
+        trace_id: 't-tool-call-1',
+        step_index: 1,
+        seq: 3
+      });
+      onEvent({
+        event: 'tool_call.stable',
+        payload: { call_id: 'call-1', name: 'add', args: { a: 1, b: 2 } },
+        trace_id: 't-tool-call-1',
+        step_index: 1,
+        seq: 4
+      });
+      onEvent({
+        event: 'tool_call.parse_error',
+        payload: { call_id: 'call-2', parse_reason: 'invalid json' },
+        trace_id: 't-tool-call-1',
+        step_index: 1,
+        seq: 5
+      });
+      return { output: 'ok:tool-events', traceId: 't-tool-call-1', state: 'DONE' };
+    }
+  };
+
+  const worker = new RuntimeRpcWorker({ queue, runner, bus });
+  worker.start();
+
+  const sendEvents = [];
+  await queue.submit({
+    jsonrpc: '2.0',
+    id: 'tool-call-evt-1',
+    method: 'runtime.run',
+    params: { input: 'emit tool events' }
+  }, {
+    send: () => {},
+    sendEvent: (payload) => sendEvents.push(payload)
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const toolCallEvents = sendEvents.filter((evt) => evt.method === 'tool_call.event');
+  assert.equal(toolCallEvents.length, 3);
+  assert.deepEqual(toolCallEvents.map((evt) => evt.params.type), [
+    'tool_call.delta',
+    'tool_call.stable',
+    'tool_call.parse_error'
+  ]);
+
+  worker.stop();
+});
+
 test('RuntimeRpcWorker accepts image-only input_images and forwards to runner', async () => {
   const queue = new RpcInputQueue();
   const bus = new RuntimeEventBus();

@@ -60,6 +60,20 @@ function extractMessageDeltaFromRuntimeEvent(event) {
   return preview;
 }
 
+function extractToolCallEventFromRuntimeEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  const eventType = String(event.event || '');
+  if (!eventType.startsWith('tool_call.')) return null;
+  return {
+    session_id: event.session_id || null,
+    trace_id: event.trace_id || null,
+    step_index: event.step_index ?? null,
+    seq: event.seq ?? null,
+    type: eventType,
+    payload: event.payload || {}
+  };
+}
+
 class RuntimeRpcWorker {
   constructor({ queue, runner, bus }) {
     this.queue = queue;
@@ -276,6 +290,11 @@ class RuntimeRpcWorker {
             step_index: event.step_index ?? null,
             delta
           }));
+        }
+
+        const toolCallEvent = extractToolCallEventFromRuntimeEvent(event);
+        if (toolCallEvent) {
+          context.sendEvent?.(toRpcEvent('tool_call.event', toolCallEvent));
         }
       }
     });
