@@ -147,6 +147,51 @@ test('ToolLoopRunner marks first_tool_result_ms when tool result arrives', async
   dispatcher.stop();
 });
 
+test('ToolLoopRunner emits llm.stream events when streaming decision is enabled', async () => {
+  const bus = new RuntimeEventBus();
+  const executor = new ToolExecutor(localTools);
+  const dispatcher = new ToolCallDispatcher({ bus, executor });
+  dispatcher.start();
+
+  const reasoner = {
+    async decideStream({ onDelta }) {
+      onDelta?.('你好');
+      onDelta?.('，世界');
+      return {
+        type: 'final',
+        output: '你好，世界'
+      };
+    }
+  };
+
+  const events = [];
+  const runner = new ToolLoopRunner({
+    bus,
+    getReasoner: () => reasoner,
+    listTools: () => executor.listTools(),
+    maxStep: 2,
+    toolResultTimeoutMs: 2000,
+    runtimeStreamingEnabled: true
+  });
+
+  const result = await runner.run({
+    sessionId: 's-stream',
+    input: 'stream hello',
+    onEvent: (event) => events.push(event)
+  });
+
+  assert.equal(result.state, 'DONE');
+  assert.equal(result.output, '你好，世界');
+  assert.ok(events.some((evt) => evt.event === 'llm.stream.start'));
+  assert.ok(events.some((evt) => evt.event === 'llm.stream.end'));
+  const deltas = events.filter((evt) => evt.event === 'llm.stream.delta').map((evt) => evt.payload.delta);
+  assert.deepEqual(deltas, ['你好', '，世界']);
+  const finalEvent = events.find((evt) => evt.event === 'llm.final');
+  assert.equal(finalEvent.payload.streamed, true);
+
+  dispatcher.stop();
+});
+
 
 
 test('ToolLoopRunner executes multiple tool calls in one step serially', async () => {

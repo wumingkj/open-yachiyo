@@ -154,6 +154,46 @@ test('RuntimeRpcWorker does not emit message.delta for non-final llm decisions',
   worker.stop();
 });
 
+test('RuntimeRpcWorker forwards llm.stream.delta and skips duplicated streamed llm.final delta', async () => {
+  const queue = new RpcInputQueue();
+  const bus = new RuntimeEventBus();
+
+  const runner = {
+    async run({ onEvent }) {
+      onEvent({ event: 'llm.stream.delta', payload: { delta: '你' }, trace_id: 't-stream-1', step_index: 1 });
+      onEvent({ event: 'llm.stream.delta', payload: { delta: '好' }, trace_id: 't-stream-1', step_index: 1 });
+      onEvent({
+        event: 'llm.final',
+        payload: { streamed: true, decision: { type: 'final', preview: '你好' } },
+        trace_id: 't-stream-1',
+        step_index: 1
+      });
+      return { output: '你好', traceId: 't-stream-1', state: 'DONE' };
+    }
+  };
+
+  const worker = new RuntimeRpcWorker({ queue, runner, bus });
+  worker.start();
+
+  const sendEvents = [];
+  await queue.submit({
+    jsonrpc: '2.0',
+    id: 'stream-evt-1',
+    method: 'runtime.run',
+    params: { input: 'stream it' }
+  }, {
+    send: () => {},
+    sendEvent: (payload) => sendEvents.push(payload)
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const deltaEvents = sendEvents.filter((evt) => evt.method === 'message.delta');
+  assert.equal(deltaEvents.length, 2);
+  assert.deepEqual(deltaEvents.map((evt) => evt.params.delta), ['你', '好']);
+
+  worker.stop();
+});
+
 test('RuntimeRpcWorker accepts image-only input_images and forwards to runner', async () => {
   const queue = new RpcInputQueue();
   const bus = new RuntimeEventBus();

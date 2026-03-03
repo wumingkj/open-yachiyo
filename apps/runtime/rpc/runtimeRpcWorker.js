@@ -45,7 +45,12 @@ function normalizeInputAudio(value) {
 
 function extractMessageDeltaFromRuntimeEvent(event) {
   if (!event || typeof event !== 'object') return '';
+  if (event.event === 'llm.stream.delta') {
+    const delta = typeof event.payload?.delta === 'string' ? event.payload.delta : '';
+    return delta.trim() ? delta : '';
+  }
   if (event.event !== 'llm.final') return '';
+  if (event.payload?.streamed === true) return '';
 
   const decision = event.payload?.decision;
   if (!decision || typeof decision !== 'object') return '';

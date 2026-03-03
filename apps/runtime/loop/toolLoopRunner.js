@@ -234,6 +234,9 @@ class ToolLoopRunner {
       if (event === 'llm.final' && payload?.decision?.type === 'final') {
         markMetricIfUnset('first_token_ms');
       }
+      if (event === 'llm.stream.delta') {
+        markMetricIfUnset('first_token_ms');
+      }
       if (event === 'tool.result') {
         markMetricIfUnset('first_tool_result_ms');
       }
@@ -286,6 +289,7 @@ class ToolLoopRunner {
 
       while (ctx.stepIndex < this.maxStep) {
         ctx.stepIndex += 1;
+        const availableTools = this.listTools();
         publishChainEvent(this.bus, 'loop.decide.start', {
           session_id: sessionId,
           trace_id: traceId,
@@ -293,10 +297,30 @@ class ToolLoopRunner {
           messages: ctx.messages.length
         });
 
-        const decision = await reasoner.decide({
-          messages: ctx.messages,
-          tools: this.listTools()
-        });
+        let decision = null;
+        const useStreamingDecision = this.runtimeStreamingEnabled && typeof reasoner.decideStream === 'function';
+        if (useStreamingDecision) {
+          emit('llm.stream.start', {
+            mode: 'decision_stream'
+          });
+          decision = await reasoner.decideStream({
+            messages: ctx.messages,
+            tools: availableTools,
+            onDelta: (delta) => {
+              emit('llm.stream.delta', {
+                delta: String(delta || '')
+              });
+            }
+          });
+          emit('llm.stream.end', {
+            mode: 'decision_stream'
+          });
+        } else {
+          decision = await reasoner.decide({
+            messages: ctx.messages,
+            tools: availableTools
+          });
+        }
         publishChainEvent(this.bus, 'loop.decide.completed', {
           session_id: sessionId,
           trace_id: traceId,
@@ -305,7 +329,10 @@ class ToolLoopRunner {
           tool_calls: Array.isArray(decision?.tools) ? decision.tools.length : (decision?.tool ? 1 : 0)
         });
 
-        emit('llm.final', { decision: formatDecisionEvent(decision) });
+        emit('llm.final', {
+          decision: formatDecisionEvent(decision),
+          streamed: useStreamingDecision
+        });
 
         if (decision.type === 'final') {
           if (decision.assistantMessage) {

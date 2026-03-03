@@ -12,6 +12,31 @@ function parseToolArgs(raw) {
   }
 }
 
+function extractTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      if (typeof part.text === 'string') return part.text;
+      if (part.type === 'text' && typeof part.text?.value === 'string') return part.text.value;
+      return '';
+    })
+    .join('');
+}
+
+function normalizeToolCallsFromMessage(message) {
+  return Array.isArray(message?.tool_calls)
+    ? message.tool_calls
+      .filter((tc) => tc?.function?.name)
+      .map((tc) => ({
+        call_id: tc.id || null,
+        name: tc.function.name,
+        args: parseToolArgs(tc.function.arguments)
+      }))
+    : [];
+}
+
 class OpenAIReasoner {
   constructor({
     apiKey,
@@ -31,6 +56,43 @@ class OpenAIReasoner {
     this.timeoutMs = timeoutMs;
     this.maxRetries = Math.max(0, Number(maxRetries) || 0);
     this.retryDelayMs = Math.max(0, Number(retryDelayMs) || 0);
+  }
+
+  buildPayload({ messages, tools, stream = false }) {
+    return {
+      model: this.model,
+      temperature: 0.2,
+      tool_choice: 'auto',
+      stream: Boolean(stream),
+      messages,
+      tools: tools.map((tool) => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description || '',
+          parameters: tool.input_schema || { type: 'object', properties: {}, additionalProperties: true }
+        }
+      }))
+    };
+  }
+
+  buildDecisionFromAssistantMessage(message) {
+    const toolCalls = normalizeToolCallsFromMessage(message);
+    if (toolCalls.length > 0) {
+      return {
+        type: 'tool',
+        assistantMessage: message,
+        tool: toolCalls[0],
+        tools: toolCalls
+      };
+    }
+
+    const content = extractTextContent(message?.content);
+    return {
+      type: 'final',
+      assistantMessage: message,
+      output: content || '模型未返回文本输出。'
+    };
   }
 
   isRetriableStatus(status) {
@@ -62,20 +124,7 @@ class OpenAIReasoner {
   }
 
   async decide({ messages, tools }) {
-    const payload = {
-      model: this.model,
-      temperature: 0.2,
-      tool_choice: 'auto',
-      messages,
-      tools: tools.map((tool) => ({
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description || '',
-          parameters: tool.input_schema || { type: 'object', properties: {}, additionalProperties: true }
-        }
-      }))
-    };
+    const payload = this.buildPayload({ messages, tools, stream: false });
 
     let lastError = null;
     const totalAttempts = this.maxRetries + 1;
@@ -108,37 +157,172 @@ class OpenAIReasoner {
         if (!message) {
           throw new Error('LLM response missing choices[0].message');
         }
+        return this.buildDecisionFromAssistantMessage(message);
+      } catch (err) {
+        lastError = err;
+        if (attempt < this.maxRetries && this.isRetriableNetworkError(err)) {
+          await this.waitBeforeRetry(attempt);
+          continue;
+        }
+        break;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
 
-        const toolCalls = Array.isArray(message.tool_calls)
-          ? message.tool_calls
-            .filter((tc) => tc?.function?.name)
-            .map((tc) => ({
-              call_id: tc.id || null,
-              name: tc.function.name,
-              args: parseToolArgs(tc.function.arguments)
-            }))
-          : [];
+    const message = lastError?.message || String(lastError || 'unknown error');
+    throw new Error(
+      `LLM request failed after ${totalAttempts} attempt(s): ${message} (base_url=${this.baseUrl}, model=${this.model})`
+    );
+  }
 
-        if (toolCalls.length > 0) {
-          return {
-            type: 'tool',
-            assistantMessage: message,
-            tool: toolCalls[0],
-            tools: toolCalls
-          };
+  async decideStream({ messages, tools, onDelta = null }) {
+    const payload = this.buildPayload({ messages, tools, stream: true });
+
+    let lastError = null;
+    const totalAttempts = this.maxRetries + 1;
+
+    for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          const body = await response.text();
+          if (this.isRetriableStatus(response.status) && attempt < this.maxRetries) {
+            await this.waitBeforeRetry(attempt);
+            continue;
+          }
+          throw new Error(`LLM request failed: ${response.status} ${body}`);
         }
 
-        const content = typeof message.content === 'string'
-          ? message.content
-          : Array.isArray(message.content)
-            ? message.content.map((part) => part?.text || '').join('')
-            : '';
+        if (!response.body || typeof response.body[Symbol.asyncIterator] !== 'function') {
+          throw new Error('LLM stream response body is unavailable');
+        }
 
-        return {
-          type: 'final',
-          assistantMessage: message,
-          output: content || '模型未返回文本输出。'
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let sawDone = false;
+        let textOutput = '';
+        const toolCallMap = new Map();
+
+        const emitDelta = (value) => {
+          const delta = String(value || '');
+          if (!delta) return;
+          if (typeof onDelta === 'function') {
+            try {
+              onDelta(delta);
+            } catch {
+              // Ignore callback failures to keep stream consumer robust.
+            }
+          }
         };
+
+        const processChunkData = (jsonPayload) => {
+          const choice = jsonPayload?.choices?.[0];
+          if (!choice) return;
+          const delta = choice.delta || {};
+          const contentDelta = extractTextContent(delta.content);
+          if (contentDelta) {
+            textOutput += contentDelta;
+            emitDelta(contentDelta);
+          }
+
+          if (Array.isArray(delta.tool_calls)) {
+            for (const tc of delta.tool_calls) {
+              const index = Number.isFinite(Number(tc?.index)) ? Number(tc.index) : 0;
+              const existing = toolCallMap.get(index) || {
+                index,
+                id: '',
+                name: '',
+                argsRaw: ''
+              };
+              if (typeof tc?.id === 'string' && tc.id) {
+                existing.id = tc.id;
+              }
+              const nameDelta = tc?.function?.name;
+              if (typeof nameDelta === 'string' && nameDelta) {
+                existing.name += nameDelta;
+              }
+              const argsDelta = tc?.function?.arguments;
+              if (typeof argsDelta === 'string' && argsDelta) {
+                existing.argsRaw += argsDelta;
+              }
+              toolCallMap.set(index, existing);
+            }
+          }
+        };
+
+        for await (const chunk of response.body) {
+          buffer += decoder.decode(chunk, { stream: true });
+          let lineBreakIndex = buffer.indexOf('\n');
+          while (lineBreakIndex >= 0) {
+            const rawLine = buffer.slice(0, lineBreakIndex);
+            buffer = buffer.slice(lineBreakIndex + 1);
+            const line = rawLine.trim();
+            if (!line || !line.startsWith('data:')) {
+              lineBreakIndex = buffer.indexOf('\n');
+              continue;
+            }
+
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') {
+              sawDone = true;
+              break;
+            }
+
+            let parsed = null;
+            try {
+              parsed = JSON.parse(data);
+            } catch {
+              lineBreakIndex = buffer.indexOf('\n');
+              continue;
+            }
+            processChunkData(parsed);
+            lineBreakIndex = buffer.indexOf('\n');
+          }
+          if (sawDone) break;
+        }
+
+        const tail = buffer.trim();
+        if (!sawDone && tail.startsWith('data:')) {
+          const data = tail.slice(5).trim();
+          if (data && data !== '[DONE]') {
+            try {
+              processChunkData(JSON.parse(data));
+            } catch {
+              // ignore malformed tail payloads
+            }
+          }
+        }
+
+        const toolCalls = Array.from(toolCallMap.values())
+          .sort((a, b) => a.index - b.index)
+          .map((item, idx) => ({
+            id: item.id || `call_stream_${idx + 1}`,
+            type: 'function',
+            function: {
+              name: item.name || 'unknown_tool',
+              arguments: item.argsRaw || '{}'
+            }
+          }));
+
+        const assistantMessage = {
+          role: 'assistant',
+          content: textOutput || '',
+          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+        };
+
+        return this.buildDecisionFromAssistantMessage(assistantMessage);
       } catch (err) {
         lastError = err;
         if (attempt < this.maxRetries && this.isRetriableNetworkError(err)) {
