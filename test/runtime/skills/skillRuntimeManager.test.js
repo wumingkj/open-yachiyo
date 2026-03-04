@@ -131,3 +131,46 @@ test('SkillRuntimeManager includes loaded skills for discovery query', () => {
     else process.env.YACHIYO_HOME = old;
   }
 });
+
+test('SkillRuntimeManager selects apple-events-music for 播放音乐 with skill keywords', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-rt-music-select-'));
+  const workspace = path.join(tmp, 'ws');
+  const yhome = path.join(tmp, 'yachiyo');
+  const gskills = path.join(yhome, 'skills');
+  fs.mkdirSync(gskills, { recursive: true });
+
+  writeSkill(
+    gskills,
+    'apple-events-music',
+    'control Apple Music',
+    'keywords: apple music,播放,音乐,歌单\n'
+  );
+
+  const old = process.env.YACHIYO_HOME;
+  process.env.YACHIYO_HOME = yhome;
+
+  try {
+    const manager = new SkillRuntimeManager({
+      workspaceDir: workspace,
+      configStore: {
+        load() {
+          return {
+            home: { envKey: 'YACHIYO_HOME', defaultPath: '~/yachiyo' },
+            load: { workspace: true, global: true, extraDirs: [] },
+            limits: { maxCandidatesPerRoot: 100, maxSkillsLoadedPerSource: 50, maxSkillsInPrompt: 5, maxSkillsPromptChars: 5000, maxSkillFileBytes: 262144 },
+            trigger: { scoreThreshold: 45, maxSelectedPerTurn: 2, cooldownMs: 0, rules: {} },
+            entries: {},
+            tools: { exec: { enabled: true } }
+          };
+        }
+      }
+    });
+
+    const ctx = manager.buildTurnContext({ input: '帮我播放音乐' });
+    assert.equal(ctx.selected.includes('apple-events-music'), true);
+    assert.match(ctx.prompt, /apple-events-music/);
+  } finally {
+    if (old === undefined) delete process.env.YACHIYO_HOME;
+    else process.env.YACHIYO_HOME = old;
+  }
+});

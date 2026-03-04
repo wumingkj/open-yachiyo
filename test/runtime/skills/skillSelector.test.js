@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 
 const { SkillSelector } = require('../../../apps/runtime/skills/skillSelector');
 
-function mk(name, description = '') {
-  return { name, description };
+function mk(name, description = '', extra = {}) {
+  return { name, description, ...extra };
 }
 
 test('SkillSelector selects explicit skill with highest priority', () => {
@@ -114,4 +114,27 @@ test('SkillSelector supports aliases from config entries', () => {
 
   assert.equal(result.selected.length, 1);
   assert.equal(result.selected[0].name, 'apple-events-music');
+});
+
+test('SkillSelector selects apple-events-music at default threshold with Chinese keywords', () => {
+  const selector = new SkillSelector({ now: () => 1000 });
+  const result = selector.select({
+    skills: [
+      mk(
+        'apple-events-music',
+        'Control Apple Music via Apple Events',
+        { keywords: ['播放', '音乐', '歌单', 'apple music'] }
+      ),
+      mk('weather', 'Get weather forecast')
+    ],
+    input: '帮我播放音乐',
+    triggerConfig: {
+      scoreThreshold: 45,
+      maxSelectedPerTurn: 2,
+      cooldownMs: 0,
+      entries: {}
+    }
+  });
+
+  assert.equal(result.selected.some((s) => s.name === 'apple-events-music'), true);
 });
