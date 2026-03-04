@@ -31,6 +31,18 @@ function makeSpectrum({ low = 0, lowMid = 0, mid = 0, highMid = 0, high = 0 } = 
   return { buffer, sampleRate };
 }
 
+function renderFrame(runtimeState, spectrum, voiceEnergy = 0.72) {
+  return resolveVisemeFrame({
+    frequencyBuffer: spectrum.buffer,
+    sampleRate: spectrum.sampleRate,
+    voiceEnergy,
+    speaking: true,
+    fallbackOpen: 0,
+    fallbackForm: 0,
+    state: runtimeState
+  });
+}
+
 test('extractVisemeFeatures captures brighter spectra as spreadness', () => {
   const { buffer, sampleRate } = makeSpectrum({
     low: 0.1,
@@ -169,4 +181,89 @@ test('deriveMouthParams gives distinct vowel mouth shapes', () => {
   assert.ok(iShape.mouthForm > 0.7);
   assert.ok(uShape.mouthForm < -0.6);
   assert.ok(oShape.mouthForm < uShape.mouthForm);
+});
+
+test('resolveVisemeFrame detects stop-like transients and adds positive form overlay', () => {
+  const runtimeState = createRuntimeState();
+  renderFrame(runtimeState, makeSpectrum({
+    low: 0.08,
+    lowMid: 0.24,
+    mid: 0.34,
+    highMid: 0.02,
+    high: 0.01
+  }), 0.58);
+  renderFrame(runtimeState, makeSpectrum({
+    low: 0.08,
+    lowMid: 0.38,
+    mid: 0.66,
+    highMid: 0.03,
+    high: 0.01
+  }), 0.8);
+  const overlayFrame = renderFrame(runtimeState, makeSpectrum({
+    low: 0.08,
+    lowMid: 0.44,
+    mid: 0.78,
+    highMid: 0.04,
+    high: 0.01
+  }), 0.84);
+
+  assert.equal(overlayFrame.consonantOverlay?.kind, 'stopLike');
+  assert.ok((overlayFrame.consonantOverlay?.mouthFormDelta || 0) > 0.04);
+});
+
+test('resolveVisemeFrame detects fricative-like transients and narrows the mouth', () => {
+  const runtimeState = createRuntimeState();
+  renderFrame(runtimeState, makeSpectrum({
+    low: 0.02,
+    lowMid: 0.04,
+    mid: 0.14,
+    highMid: 0.28,
+    high: 0.42
+  }), 0.5);
+  renderFrame(runtimeState, makeSpectrum({
+    low: 0.02,
+    lowMid: 0.05,
+    mid: 0.2,
+    highMid: 0.56,
+    high: 0.82
+  }), 0.74);
+  const overlayFrame = renderFrame(runtimeState, makeSpectrum({
+    low: 0.02,
+    lowMid: 0.05,
+    mid: 0.22,
+    highMid: 0.62,
+    high: 0.92
+  }), 0.78);
+
+  assert.equal(overlayFrame.consonantOverlay?.kind, 'fricativeLike');
+  assert.ok((overlayFrame.consonantOverlay?.mouthFormDelta || 0) > 0.03);
+  assert.ok((overlayFrame.consonantOverlay?.mouthOpenDelta || 0) < 0);
+});
+
+test('resolveVisemeFrame detects bilabial-like transients and briefly closes the mouth', () => {
+  const runtimeState = createRuntimeState();
+  renderFrame(runtimeState, makeSpectrum({
+    low: 0.18,
+    lowMid: 0.14,
+    mid: 0.04,
+    highMid: 0.01,
+    high: 0
+  }), 0.5);
+  renderFrame(runtimeState, makeSpectrum({
+    low: 0.44,
+    lowMid: 0.28,
+    mid: 0.06,
+    highMid: 0.01,
+    high: 0
+  }), 0.78);
+  const overlayFrame = renderFrame(runtimeState, makeSpectrum({
+    low: 0.62,
+    lowMid: 0.36,
+    mid: 0.06,
+    highMid: 0.01,
+    high: 0
+  }), 0.82);
+
+  assert.equal(overlayFrame.consonantOverlay?.kind, 'bilabialLike');
+  assert.ok((overlayFrame.consonantOverlay?.mouthOpenDelta || 0) < -0.08);
 });

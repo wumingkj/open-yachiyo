@@ -48,6 +48,7 @@
   let lipsyncCurrentMouthForm = 0;
   let lipsyncBaselineMouthOpen = 0;
   let lipsyncBaselineMouthForm = 0;
+  let lipsyncOpenDeadzoneActive = false;
   let lipsyncSpeakingActive = false;
   let lipsyncDetachModelHook = null;
   let lipsyncDetachTickerHook = null;
@@ -57,6 +58,9 @@
   let activeVoiceRequestId = null;
   let systemAudioDebugBound = false;
   let realtimeVoicePlayer = null;
+  let lipsyncMediaElementSource = null;
+  let lipsyncMediaElement = null;
+  let lipsyncMediaElementAnalyser = null;
   let faceBlendState = {
     current: {
       mouthForm: 0,
@@ -180,12 +184,14 @@
   const MODEL_TAP_SUPPRESS_AFTER_DRAG_MS = 220;
   const MODEL_TAP_SUPPRESS_AFTER_FOCUS_MS = 240;
   const LIPSYNC_ACTIVE_ENERGY_MIN = 0.018;
-  const LIPSYNC_BASELINE_OPEN_ALPHA = 0.024;
+  const LIPSYNC_BASELINE_OPEN_ALPHA = 0.032;
   const LIPSYNC_BASELINE_FORM_ALPHA = 0.02;
   const LIPSYNC_VARIANCE_OPEN_GAIN_MIN = 3.0;
   const LIPSYNC_VARIANCE_OPEN_GAIN_MAX = 4.0;
-  const LIPSYNC_VARIANCE_OPEN_NEGATIVE_GAIN = 0.82;
-  const LIPSYNC_SPEAKING_OPEN_FLOOR_RATIO = 0.36;
+  const LIPSYNC_VARIANCE_OPEN_NEGATIVE_GAIN = 0.9;
+  const LIPSYNC_SPEAKING_OPEN_FLOOR_RATIO = 0.22;
+  const LIPSYNC_OPEN_DEADZONE_ENTER = 0.09;
+  const LIPSYNC_OPEN_DEADZONE_EXIT = 0.11;
   const LIPSYNC_VARIANCE_FORM_GAIN_MIN = 2.0;
   const LIPSYNC_VARIANCE_FORM_GAIN_MAX = 3.0;
   const FACE_BLEND_ATTACK = 0.2;
@@ -297,6 +303,7 @@
     lipsyncCurrentMouthForm = basePose.mouthForm;
     lipsyncBaselineMouthOpen = basePose.mouthOpen;
     lipsyncBaselineMouthForm = basePose.mouthForm;
+    lipsyncOpenDeadzoneActive = false;
     return basePose;
   }
 
@@ -1006,6 +1013,51 @@
     }
   }
 
+  function ensureRuntimeVoiceConfig() {
+    runtimeUiConfig = runtimeUiConfig && typeof runtimeUiConfig === 'object' ? runtimeUiConfig : {};
+    runtimeUiConfig.voice = {
+      ...(window.DesktopLive2dDefaults?.DEFAULT_UI_CONFIG?.voice || {}),
+      ...(runtimeUiConfig.voice || {}),
+      realtime: {
+        ...((window.DesktopLive2dDefaults?.DEFAULT_UI_CONFIG?.voice || {}).realtime || {}),
+        ...(runtimeUiConfig?.voice?.realtime || {})
+      }
+    };
+    return runtimeUiConfig.voice;
+  }
+
+  function resolveVoiceOutputDelayMs(overrideValue = null) {
+    const runtimeVoice = ensureRuntimeVoiceConfig();
+    const candidate = overrideValue ?? runtimeVoice.outputDelayMs;
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed)
+      ? Math.max(0, Math.min(500, Math.round(parsed)))
+      : 0;
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+    });
+  }
+
+  function normalizeLegacyVoiceAudioUrl(audioRef = '') {
+    const raw = String(audioRef || '').trim();
+    if (!raw) return '';
+    if (/^[a-z]+:\/\//i.test(raw)) {
+      return raw;
+    }
+    if (raw.startsWith('/')) {
+      return `file://${encodeURI(raw)}`;
+    }
+    return raw;
+  }
+
+  async function primeLipsync(audioElement, options = {}) {
+    const started = await startLipsync(audioElement, options);
+    return started;
+  }
+
   function syncDragZoneVisual(values) {
     if (!dragZoneVisualElement) {
       return;
@@ -1280,6 +1332,26 @@
       mouthOpen: boostedOpen,
       mouthForm: boostedForm
     };
+  }
+
+  function applyMouthOpenDeadzone({ mouthOpen = 0, speaking = false } = {}) {
+    const open = clamp(Number(mouthOpen) || 0, 0, 1);
+    const active = Boolean(speaking);
+
+    if (lipsyncOpenDeadzoneActive) {
+      if (open >= LIPSYNC_OPEN_DEADZONE_EXIT) {
+        lipsyncOpenDeadzoneActive = false;
+        return open;
+      }
+      return 0;
+    }
+
+    if (open <= LIPSYNC_OPEN_DEADZONE_ENTER && (!active || open <= LIPSYNC_OPEN_DEADZONE_EXIT)) {
+      lipsyncOpenDeadzoneActive = true;
+      return 0;
+    }
+
+    return open;
   }
 
   function releaseCurrentVoiceObjectUrl() {
@@ -1759,22 +1831,39 @@
       }
 
       if (externalAnalyser) {
-        lipsyncAudioSource = null;
+        lipsyncAudioSource = lipsyncMediaElementSource;
         lipsyncAnalyser = externalAnalyser;
         emitLipsyncTelemetry('sync.graph_ready', {
           has_audio_context: true,
-          has_audio_source: false,
+          has_audio_source: !!lipsyncAudioSource,
           has_analyser: !!lipsyncAnalyser,
           source_label: sourceLabel
         });
-      } else if (!lipsyncAudioSource || !lipsyncAnalyser) {
-        // MediaElementSource can only be created once for the same audio element.
-        lipsyncAudioSource = audioContext.createMediaElementSource(audioElement);
-        lipsyncAnalyser = audioContext.createAnalyser();
-        lipsyncAnalyser.fftSize = 2048;
-        lipsyncAnalyser.smoothingTimeConstant = 0.8;
-        lipsyncAudioSource.connect(lipsyncAnalyser);
-        lipsyncAnalyser.connect(audioContext.destination);
+      } else {
+        if (!audioElement) {
+          emitLipsyncTelemetry('sync.unavailable', {
+            reason: 'missing_audio_element',
+            source_label: sourceLabel
+          });
+          return false;
+        }
+
+        if (!lipsyncMediaElementSource || lipsyncMediaElement !== audioElement) {
+          // One MediaElementSourceNode can only be bound once per media element.
+          lipsyncMediaElementSource = audioContext.createMediaElementSource(audioElement);
+          lipsyncMediaElement = audioElement;
+        }
+
+        if (!lipsyncMediaElementAnalyser) {
+          lipsyncMediaElementAnalyser = audioContext.createAnalyser();
+          lipsyncMediaElementAnalyser.fftSize = 2048;
+          lipsyncMediaElementAnalyser.smoothingTimeConstant = 0.8;
+          lipsyncMediaElementSource.connect(lipsyncMediaElementAnalyser);
+          lipsyncMediaElementAnalyser.connect(audioContext.destination);
+        }
+
+        lipsyncAudioSource = lipsyncMediaElementSource;
+        lipsyncAnalyser = lipsyncMediaElementAnalyser;
         console.log('[lipsync] Audio nodes connected', {
           fftSize: lipsyncAnalyser.fftSize,
           frequencyBinCount: lipsyncAnalyser.frequencyBinCount,
@@ -1859,9 +1948,24 @@
           voiceEnergy,
           speaking
         });
-        const mouthOpen = enhanced.mouthOpen;
-        const mouthForm = enhanced.mouthForm;
-        lipsyncTargetMouthOpen = mouthOpen;
+        const consonantOverlay = frame.consonantOverlay && typeof frame.consonantOverlay === 'object'
+          ? frame.consonantOverlay
+          : null;
+        const mouthOpen = clamp(
+          enhanced.mouthOpen + (Number(consonantOverlay?.mouthOpenDelta) || 0),
+          0,
+          1
+        );
+        const stabilizedMouthOpen = applyMouthOpenDeadzone({
+          mouthOpen,
+          speaking
+        });
+        const mouthForm = clamp(
+          enhanced.mouthForm + (Number(consonantOverlay?.mouthFormDelta) || 0),
+          -1,
+          1
+        );
+        lipsyncTargetMouthOpen = stabilizedMouthOpen;
         lipsyncTargetMouthForm = mouthForm;
         lipsyncSpeakingActive = speaking;
 
@@ -1881,14 +1985,22 @@
             frame: {
               rawOpenY: rawMouthOpen.toFixed(3),
               rawForm: rawMouthForm.toFixed(3),
-              openY: mouthOpen.toFixed(3),
+              openY: stabilizedMouthOpen.toFixed(3),
               form: mouthForm.toFixed(3)
-            }
+            },
+            transient: consonantOverlay
+              ? {
+                kind: consonantOverlay.kind,
+                strength: (Number(consonantOverlay.strength) || 0).toFixed(2),
+                openDelta: (Number(consonantOverlay.mouthOpenDelta) || 0).toFixed(3),
+                formDelta: (Number(consonantOverlay.mouthFormDelta) || 0).toFixed(3)
+              }
+              : null
           });
           emitLipsyncTelemetry('frame.sample', {
             frame: frameCount,
             voice_energy: Number(frame.features?.voiceEnergy) || voiceEnergy,
-            mouth_open: mouthOpen,
+            mouth_open: stabilizedMouthOpen,
             mouth_form: mouthForm,
             confidence: Number(frame.confidence) || 0
           });
@@ -1899,7 +2011,7 @@
             voice_energy: Number(frame.features?.voiceEnergy) || voiceEnergy,
             raw_mouth_open: rawMouthOpen,
             raw_mouth_form: rawMouthForm,
-            mouth_open: mouthOpen,
+            mouth_open: stabilizedMouthOpen,
             mouth_form: mouthForm,
             confidence: Number(frame.confidence) || 0,
             apply_mode: lipsyncApplyMode,
@@ -1914,7 +2026,7 @@
             voice_energy: Number(frame.features?.voiceEnergy) || voiceEnergy,
             raw_mouth_open: rawMouthOpen,
             raw_mouth_form: rawMouthForm,
-            mouth_open: mouthOpen,
+            mouth_open: stabilizedMouthOpen,
             mouth_form: mouthForm,
             confidence: Number(frame.confidence) || 0
           });
@@ -2048,8 +2160,15 @@
     };
   }
 
-  async function playVoiceFromRemote({ audioUrl = null, mimeType = 'audio/ogg', requestId = null, request_id = null } = {}) {
+  async function playVoiceFromRemote({
+    audioUrl = null,
+    mimeType = 'audio/ogg',
+    requestId = null,
+    request_id = null,
+    outputDelayMs = null
+  } = {}) {
     const nextRequestId = normalizeVoiceRequestId(requestId || request_id || `${Date.now()}-voice`);
+    const playbackDelayMs = resolveVoiceOutputDelayMs(outputDelayMs);
     const normalizedAudioUrl = String(audioUrl || '').trim();
     let playbackErrorReported = false;
     let audioUrlHost = null;
@@ -2061,6 +2180,7 @@
     emitRendererDebug('voice_remote.playback_enter', {
       request_id: nextRequestId,
       mime_type: String(mimeType || 'audio/ogg'),
+      output_delay_ms: playbackDelayMs,
       audio_url_host: audioUrlHost
     });
     emitLipsyncTelemetry('playback.requested', {
@@ -2122,7 +2242,7 @@
       });
 
       // Start lipsync asynchronously so remote playback is never blocked by lipsync init.
-      void startLipsync(systemAudio).then((lipsyncStarted) => {
+      void primeLipsync(systemAudio).then((lipsyncStarted) => {
         if (!lipsyncStarted) {
           emitLipsyncTelemetry('playback.lipsync_inactive', {
             request_id: nextRequestId,
@@ -2153,8 +2273,19 @@
       });
 
       try {
+        if (playbackDelayMs > 0) {
+          emitRendererDebug('voice_remote.play_delay_wait', {
+            request_id: nextRequestId,
+            output_delay_ms: playbackDelayMs
+          });
+          await wait(playbackDelayMs);
+          if (activeVoiceRequestId !== nextRequestId) {
+            throw new Error('voice playback superseded during output delay');
+          }
+        }
         emitRendererDebug('voice_remote.play_attempt', {
           request_id: nextRequestId,
+          output_delay_ms: playbackDelayMs,
           ...snapshotSystemAudioState()
         });
         await systemAudio.play();
@@ -2238,14 +2369,23 @@
     }
   }
 
-  async function playVoiceFromMemory({ audioBytes = null, audioBase64 = null, mimeType = 'audio/ogg', requestId = null, request_id = null } = {}) {
+  async function playVoiceFromMemory({
+    audioBytes = null,
+    audioBase64 = null,
+    mimeType = 'audio/ogg',
+    requestId = null,
+    request_id = null,
+    outputDelayMs = null
+  } = {}) {
     const nextRequestId = normalizeVoiceRequestId(requestId || request_id || `${Date.now()}-voice`);
+    const playbackDelayMs = resolveVoiceOutputDelayMs(outputDelayMs);
     let objectUrl = null;
     let playbackErrorReported = false;
     const coarseBytes = coerceAudioBytes(audioBytes);
     emitRendererDebug('voice_memory.playback_enter', {
       request_id: nextRequestId,
       mime_type: String(mimeType || 'audio/ogg'),
+      output_delay_ms: playbackDelayMs,
       bytes: Number(coarseBytes?.byteLength) || 0,
       base64_chars: Number(audioBase64?.length) || 0
     });
@@ -2342,7 +2482,7 @@
       });
 
       // Start lipsync asynchronously so audio playback is never blocked by lipsync init.
-      void startLipsync(systemAudio).then((lipsyncStarted) => {
+      void primeLipsync(systemAudio).then((lipsyncStarted) => {
         if (!lipsyncStarted) {
           emitLipsyncTelemetry('playback.lipsync_inactive', {
             request_id: nextRequestId,
@@ -2373,8 +2513,19 @@
       });
 
       try {
+        if (playbackDelayMs > 0) {
+          emitRendererDebug('voice_memory.play_delay_wait', {
+            request_id: nextRequestId,
+            output_delay_ms: playbackDelayMs
+          });
+          await wait(playbackDelayMs);
+          if (activeVoiceRequestId !== nextRequestId) {
+            throw new Error('voice playback superseded during output delay');
+          }
+        }
         emitRendererDebug('voice_memory.play_attempt', {
           request_id: nextRequestId,
+          output_delay_ms: playbackDelayMs,
           ...snapshotSystemAudioState()
         });
         await systemAudio.play();
@@ -2476,17 +2627,20 @@
     request_id = null,
     sampleRate = 24000,
     prebufferMs = 160,
-    idleTimeoutMs = 8000
+    idleTimeoutMs = 8000,
+    outputDelayMs = null
   } = {}) {
     const nextRequestId = normalizeVoiceRequestId(requestId || request_id || `${Date.now()}-voice`);
     if (!nextRequestId) {
       return;
     }
+    const playbackDelayMs = resolveVoiceOutputDelayMs(outputDelayMs);
 
     emitRendererDebug('voice_stream.playback_enter', {
       request_id: nextRequestId,
       sample_rate: Number(sampleRate) || 24000,
       prebuffer_ms: Number(prebufferMs) || 160,
+      output_delay_ms: playbackDelayMs,
       idle_timeout_ms: Number(idleTimeoutMs) || 8000
     });
     emitLipsyncTelemetry('playback.requested', {
@@ -2523,54 +2677,68 @@
         throw new Error('RealtimeVoicePlayer is unavailable');
       }
 
+      let realtimeLipsyncPrimePromise = null;
+      const primeRealtimeLipsync = () => {
+        if (realtimeLipsyncPrimePromise) {
+          return realtimeLipsyncPrimePromise;
+        }
+        realtimeLipsyncPrimePromise = primeLipsync(null, {
+          analyserNode: player.getAnalyserNode(),
+          audioContextInstance: player.getAudioContext(),
+          isSpeaking: () => player.isSpeaking(nextRequestId),
+          sourceLabel: 'realtime_stream'
+        }).then((lipsyncStarted) => {
+          if (!lipsyncStarted) {
+            emitLipsyncTelemetry('playback.lipsync_inactive', {
+              request_id: nextRequestId,
+              reason: 'start_lipsync_returned_false',
+              has_lipsync_api: !!lipsyncApi,
+              has_model: !!live2dModel
+            });
+            emitRendererDebug('voice_stream.lipsync_inactive', {
+              request_id: nextRequestId,
+              reason: 'start_lipsync_returned_false'
+            });
+          } else {
+            emitRendererDebug('voice_stream.lipsync_started', {
+              request_id: nextRequestId
+            });
+          }
+          return lipsyncStarted;
+        }).catch((err) => {
+          emitLipsyncTelemetry('playback.lipsync_inactive', {
+            request_id: nextRequestId,
+            reason: 'start_lipsync_rejected',
+            error: err?.message || String(err || 'unknown error')
+          });
+          emitRendererDebug('voice_stream.lipsync_failed', {
+            request_id: nextRequestId,
+            reason: 'start_lipsync_rejected',
+            error: err?.message || String(err || 'unknown error')
+          });
+          throw err;
+        });
+        return realtimeLipsyncPrimePromise;
+      };
+
       await player.startSession({
         requestId: nextRequestId,
         sampleRate,
         prebufferMs,
+        outputDelayMs: playbackDelayMs,
         idleTimeoutMs,
         onFirstAudio: () => {
+          void primeRealtimeLipsync().catch(() => {
+            // Errors are already reported in primeRealtimeLipsync.
+          });
           emitLipsyncTelemetry('playback.started', {
             request_id: nextRequestId,
             has_audio_element: false,
             source: 'realtime_stream'
           });
           emitRendererDebug('voice_stream.playback_started', {
-            request_id: nextRequestId
-          });
-
-          void startLipsync(null, {
-            analyserNode: player.getAnalyserNode(),
-            audioContextInstance: player.getAudioContext(),
-            isSpeaking: () => player.isSpeaking(nextRequestId),
-            sourceLabel: 'realtime_stream'
-          }).then((lipsyncStarted) => {
-            if (!lipsyncStarted) {
-              emitLipsyncTelemetry('playback.lipsync_inactive', {
-                request_id: nextRequestId,
-                reason: 'start_lipsync_returned_false',
-                has_lipsync_api: !!lipsyncApi,
-                has_model: !!live2dModel
-              });
-              emitRendererDebug('voice_stream.lipsync_inactive', {
-                request_id: nextRequestId,
-                reason: 'start_lipsync_returned_false'
-              });
-            } else {
-              emitRendererDebug('voice_stream.lipsync_started', {
-                request_id: nextRequestId
-              });
-            }
-          }).catch((err) => {
-            emitLipsyncTelemetry('playback.lipsync_inactive', {
-              request_id: nextRequestId,
-              reason: 'start_lipsync_rejected',
-              error: err?.message || String(err || 'unknown error')
-            });
-            emitRendererDebug('voice_stream.lipsync_failed', {
-              request_id: nextRequestId,
-              reason: 'start_lipsync_rejected',
-              error: err?.message || String(err || 'unknown error')
-            });
+            request_id: nextRequestId,
+            output_delay_ms: playbackDelayMs
           });
         },
         onEnded: ({ reason }) => {
@@ -2615,6 +2783,10 @@
             activeVoiceRequestId = null;
           }
         }
+      });
+
+      void primeRealtimeLipsync().catch(() => {
+        // Errors are already reported in primeRealtimeLipsync.
       });
 
       emitLipsyncTelemetry('playback.source_ready', {
@@ -3792,7 +3964,26 @@
       } else if (method === 'server_event_forward') {
         const { name, data } = params || {};
         console.log('[Renderer] Received RPC invoke:', name);
-        result = { ok: true, ignored: true, name, data };
+        if (name === 'voice.playback.electron') {
+          const audioUrl = normalizeLegacyVoiceAudioUrl(data?.audio_ref || data?.audioRef || '');
+          if (!audioUrl) {
+            throw createRpcError(-32602, 'voice.playback.electron requires audio_ref');
+          }
+          void playVoiceFromRemote({
+            requestId: `legacy-${Date.now()}`,
+            audioUrl,
+            mimeType: String(data?.format || 'audio/ogg'),
+            outputDelayMs: resolveVoiceOutputDelayMs()
+          }).catch((err) => {
+            console.error('[Renderer] legacy voice playback failed', err);
+            emitRendererDebug('voice_legacy.failed', {
+              error: err?.message || String(err || 'unknown error')
+            });
+          });
+          result = { ok: true, handled: true, name };
+        } else {
+          result = { ok: true, ignored: true, name, data };
+        }
       } else {
         throw createRpcError(-32601, `method not found: ${method}`);
       }
