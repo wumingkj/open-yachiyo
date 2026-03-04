@@ -2687,7 +2687,7 @@ async function startDesktopSuite({
     logger,
     onNotification: (desktopEvent) => {
       const notificationEventName = desktopEvent?.type === 'runtime.event'
-        ? String(desktopEvent?.data?.name || '')
+        ? String(desktopEvent?.data?.event || desktopEvent?.data?.name || '')
         : null;
       emitDesktopDebug('chain.electron.notification.received', 'electron main received gateway notification', {
         type: desktopEvent?.type || null,
@@ -2701,8 +2701,9 @@ async function startDesktopSuite({
       });
 
       //  2. 【核心改造】：新增这块透明透传网关逻辑！
-      if (desktopEvent.type === 'runtime.event' && desktopEvent.data?.name) {
-        const eventName = desktopEvent.data.name;
+      const bridgedEventName = String(desktopEvent?.data?.name || desktopEvent?.data?.event || '');
+      if (desktopEvent.type === 'runtime.event' && bridgedEventName) {
+        const eventName = bridgedEventName;
         console.log('[desktop-live2d] gateway_event_forward', { eventName });
         const activeBridge = ipcBridgeRef;
 
