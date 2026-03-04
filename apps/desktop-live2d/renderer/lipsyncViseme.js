@@ -40,6 +40,33 @@
       holdDecay: 0.74,
       energyDrivenOpenFloor: 0.02,
       energyDrivenOpenScale: 1.95
+    },
+    transients: {
+      confirmFrames: 2,
+      cooldownFrames: 6,
+      thresholds: {
+        stopLike: 0.24,
+        fricativeLike: 0.26,
+        bilabialLike: 0.24
+      },
+      envelopes: {
+        stopLike: {
+          durationFrames: 7,
+          openCloseAmount: 0.08,
+          openReleaseAmount: 0.05,
+          formAmount: 0.24
+        },
+        fricativeLike: {
+          durationFrames: 8,
+          openAmount: -0.05,
+          formAmount: 0.18
+        },
+        bilabialLike: {
+          durationFrames: 8,
+          closeAmount: 0.34,
+          releaseAmount: 0.08
+        }
+      }
     }
   });
 
@@ -117,7 +144,13 @@
       smoothedWeights: createNeutralWeights(),
       lastFeatures: null,
       lowSignalFrames: 0,
-      lastResolvedFrame: null
+      lastResolvedFrame: null,
+      transientDetector: {
+        candidateKind: null,
+        candidateFrames: 0,
+        cooldownFrames: 0,
+        activeEvent: null
+      }
     };
   }
 
@@ -271,6 +304,174 @@
     );
   }
 
+  function computeTransientScores(features = {}) {
+    const flux = clamp(Number(features.flux) || 0, 0, 1);
+    const voiceEnergy = clamp(Number(features.voiceEnergy) || 0, 0, 1);
+    const peakValue = clamp(Number(features.peakValue) || 0, 0, 1);
+    const lowRatio = clamp(Number(features.lowRatio) || 0, 0, 1);
+    const lowMidRatio = clamp(Number(features.lowMidRatio) || 0, 0, 1);
+    const midRatio = clamp(Number(features.midRatio) || 0, 0, 1);
+    const highMidRatio = clamp(Number(features.highMidRatio) || 0, 0, 1);
+    const highRatio = clamp(Number(features.highRatio) || 0, 0, 1);
+    const brightness = clamp(Number(features.brightness) || 0, 0, 1);
+    const spreadness = clamp(Number(features.spreadness) || 0, 0, 1);
+    const highBurst = highMidRatio * 0.65 + highRatio;
+    const stopLike = clamp(
+      flux * 1.55
+      + midRatio * 0.72
+      + lowMidRatio * 0.44
+      + voiceEnergy * 0.22
+      - highBurst * 0.82
+      - brightness * 0.12,
+      0,
+      1
+    );
+    const fricativeLike = clamp(
+      flux * 1.15
+      + highBurst * 1.18
+      + spreadness * 0.32
+      + brightness * 0.18
+      - lowRatio * 0.44,
+      0,
+      1
+    );
+    const bilabialLike = clamp(
+      flux * 1.4
+      + lowRatio * 0.96
+      + lowMidRatio * 0.56
+      + peakValue * 0.18
+      - highBurst * 0.98
+      - brightness * 0.18,
+      0,
+      1
+    );
+    return { stopLike, fricativeLike, bilabialLike };
+  }
+
+  function pickTransientCandidate(scores = {}, thresholds = {}) {
+    const bilabialLike = Number(scores.bilabialLike) || 0;
+    const stopLike = Number(scores.stopLike) || 0;
+    const fricativeLike = Number(scores.fricativeLike) || 0;
+    if (bilabialLike >= (thresholds.bilabialLike || 0) && bilabialLike >= stopLike * 0.88) {
+      return { kind: 'bilabialLike', strength: bilabialLike };
+    }
+    if (fricativeLike >= (thresholds.fricativeLike || 0) && fricativeLike >= stopLike * 0.92) {
+      return { kind: 'fricativeLike', strength: fricativeLike };
+    }
+    if (stopLike >= (thresholds.stopLike || 0)) {
+      return { kind: 'stopLike', strength: stopLike };
+    }
+    return null;
+  }
+
+  function sampleTransientEnvelope(activeEvent, transientsConfig = {}) {
+    if (!activeEvent || !activeEvent.kind) {
+      return null;
+    }
+    const envelopes = transientsConfig.envelopes || DEFAULT_CONFIG.transients.envelopes;
+    const envelope = envelopes[activeEvent.kind];
+    if (!envelope) {
+      return null;
+    }
+    const durationFrames = Math.max(1, Number(envelope.durationFrames) || 1);
+    const progress = clamp((Number(activeEvent.frame) || 0) / durationFrames, 0, 1);
+    const strength = clamp(Number(activeEvent.strength) || 0, 0, 1);
+    if (activeEvent.kind === 'stopLike') {
+      const closePhase = progress < 0.35 ? 1 - (progress / 0.35) : 0;
+      const releasePhase = progress > 0.28 ? Math.sin(((progress - 0.28) / 0.72) * Math.PI) : 0;
+      return {
+        kind: activeEvent.kind,
+        strength,
+        mouthOpenDelta: clamp(
+          -closePhase * envelope.openCloseAmount * strength
+          + releasePhase * envelope.openReleaseAmount * strength,
+          -1,
+          1
+        ),
+        mouthFormDelta: clamp(Math.sin(progress * Math.PI) * envelope.formAmount * strength, -1, 1)
+      };
+    }
+    if (activeEvent.kind === 'fricativeLike') {
+      const intensity = Math.sin(progress * Math.PI);
+      return {
+        kind: activeEvent.kind,
+        strength,
+        mouthOpenDelta: clamp(envelope.openAmount * intensity * strength, -1, 1),
+        mouthFormDelta: clamp(envelope.formAmount * intensity * strength, -1, 1)
+      };
+    }
+    if (activeEvent.kind === 'bilabialLike') {
+      const closePhase = progress < 0.45 ? 1 - (progress / 0.45) : 0;
+      const releasePhase = progress >= 0.45 ? Math.sin(((progress - 0.45) / 0.55) * Math.PI) : 0;
+      return {
+        kind: activeEvent.kind,
+        strength,
+        mouthOpenDelta: clamp(
+          -closePhase * envelope.closeAmount * strength
+          + releasePhase * envelope.releaseAmount * strength,
+          -1,
+          1
+        ),
+        mouthFormDelta: 0
+      };
+    }
+    return null;
+  }
+
+  function resolveTransientOverlay(state, features = {}, speaking = false, config = {}) {
+    const detector = state?.transientDetector;
+    if (!detector) {
+      return null;
+    }
+    const transientsConfig = config.transients || DEFAULT_CONFIG.transients;
+    const thresholds = transientsConfig.thresholds || DEFAULT_CONFIG.transients.thresholds;
+    if (detector.cooldownFrames > 0) {
+      detector.cooldownFrames -= 1;
+    }
+    if (speaking && detector.cooldownFrames <= 0) {
+      const candidate = pickTransientCandidate(computeTransientScores(features), thresholds);
+      if (candidate) {
+        if (detector.candidateKind === candidate.kind) {
+          detector.candidateFrames += 1;
+        } else {
+          detector.candidateKind = candidate.kind;
+          detector.candidateFrames = 1;
+        }
+        if (detector.candidateFrames >= Math.max(1, Number(transientsConfig.confirmFrames) || 1)) {
+          const durationFrames = Math.max(
+            1,
+            Number((transientsConfig.envelopes || DEFAULT_CONFIG.transients.envelopes)?.[candidate.kind]?.durationFrames) || 1
+          );
+          detector.activeEvent = {
+            kind: candidate.kind,
+            strength: clamp(candidate.strength, 0, 1),
+            frame: 0,
+            durationFrames
+          };
+          detector.cooldownFrames = Math.max(0, Number(transientsConfig.cooldownFrames) || 0);
+          detector.candidateKind = null;
+          detector.candidateFrames = 0;
+        }
+      } else {
+        detector.candidateKind = null;
+        detector.candidateFrames = 0;
+      }
+    } else if (!speaking) {
+      detector.candidateKind = null;
+      detector.candidateFrames = 0;
+    }
+
+    if (!detector.activeEvent) {
+      return null;
+    }
+    const overlay = sampleTransientEnvelope(detector.activeEvent, transientsConfig);
+    detector.activeEvent.frame += 1;
+    if (detector.activeEvent.frame > detector.activeEvent.durationFrames) {
+      detector.activeEvent = null;
+    }
+    return overlay;
+  }
+
   function deriveMouthParams(weights, features = {}, config = {}) {
     const safeWeights = normalizeWeights(weights);
     const visemeShape = config.visemeShape || DEFAULT_CONFIG.visemeShape;
@@ -332,6 +533,7 @@
     const smoothedWeights = smoothWeights(targetWeights, state, input.config);
     const derived = deriveMouthParams(smoothedWeights, features, input.config);
     const confidence = speaking ? computeConfidence(features) : 0;
+    const consonantOverlay = resolveTransientOverlay(state, features, speaking, input.config);
     const holdFrames = Math.max(0, Number(silenceConfig.holdFrames) || 0);
     const holdDecay = clamp(Number(silenceConfig.holdDecay) || 0.82, 0, 1);
     const energyDrivenOpenFloor = clamp(Number(silenceConfig.energyDrivenOpenFloor) || 0, 0, 1);
@@ -352,6 +554,7 @@
           features,
           weights: normalizeWeights(heldFrame.weights || state.smoothedWeights || createNeutralWeights()),
           dominantViseme: heldFrame.dominantViseme || 'a',
+          consonantOverlay,
           mouthOpen: clamp(lerp(fallbackOpen * 0.5, Number(heldFrame.mouthOpen) || 0, decay), 0, 1),
           mouthForm: clamp(lerp(fallbackForm * 0.5, Number(heldFrame.mouthForm) || 0, decay), -1, 1)
         };
@@ -370,6 +573,7 @@
           features,
           weights: normalizeWeights(state.smoothedWeights || createNeutralWeights()),
           dominantViseme: state.lastResolvedFrame?.dominantViseme || 'a',
+          consonantOverlay,
           mouthOpen: Math.max(drivenOpen, fallbackOpen * 0.18),
           mouthForm: drivenForm
         };
@@ -382,6 +586,7 @@
         features,
         weights: state.smoothedWeights,
         dominantViseme: 'a',
+        consonantOverlay,
         mouthOpen: 0,
         mouthForm: 0
       };
@@ -405,6 +610,7 @@
       dominantViseme: VISEME_NAMES.reduce((best, name) => (
         smoothedWeights[name] > smoothedWeights[best] ? name : best
       ), 'a'),
+      consonantOverlay,
       mouthOpen: clamp(lerp(fallbackOpen * 0.22, derived.mouthOpen, openVisemeBlend), 0, 1),
       mouthForm: clamp(lerp(fallbackForm * 0.3, derived.mouthForm, formVisemeBlend), -1, 1)
     };

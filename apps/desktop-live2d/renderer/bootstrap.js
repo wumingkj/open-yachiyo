@@ -1938,8 +1938,19 @@
           voiceEnergy,
           speaking
         });
-        const mouthOpen = enhanced.mouthOpen;
-        const mouthForm = enhanced.mouthForm;
+        const consonantOverlay = frame.consonantOverlay && typeof frame.consonantOverlay === 'object'
+          ? frame.consonantOverlay
+          : null;
+        const mouthOpen = clamp(
+          enhanced.mouthOpen + (Number(consonantOverlay?.mouthOpenDelta) || 0),
+          0,
+          1
+        );
+        const mouthForm = clamp(
+          enhanced.mouthForm + (Number(consonantOverlay?.mouthFormDelta) || 0),
+          -1,
+          1
+        );
         lipsyncTargetMouthOpen = mouthOpen;
         lipsyncTargetMouthForm = mouthForm;
         lipsyncSpeakingActive = speaking;
@@ -1962,7 +1973,15 @@
               rawForm: rawMouthForm.toFixed(3),
               openY: mouthOpen.toFixed(3),
               form: mouthForm.toFixed(3)
-            }
+            },
+            transient: consonantOverlay
+              ? {
+                kind: consonantOverlay.kind,
+                strength: (Number(consonantOverlay.strength) || 0).toFixed(2),
+                openDelta: (Number(consonantOverlay.mouthOpenDelta) || 0).toFixed(3),
+                formDelta: (Number(consonantOverlay.mouthFormDelta) || 0).toFixed(3)
+              }
+              : null
           });
           emitLipsyncTelemetry('frame.sample', {
             frame: frameCount,
