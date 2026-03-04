@@ -84,7 +84,6 @@ const contextMaxChars = Math.max(0, Number(process.env.CONTEXT_MAX_CHARS) || 120
 const memoryBootstrapMaxEntries = Math.max(0, Number(process.env.MEMORY_BOOTSTRAP_MAX_ENTRIES) || 10);
 const memoryBootstrapMaxChars = Math.max(0, Number(process.env.MEMORY_BOOTSTRAP_MAX_CHARS) || 2400);
 const memorySopMaxChars = Math.max(0, Number(process.env.MEMORY_SOP_MAX_CHARS) || 8000);
-const voiceAutoReplyDefaultEnabled = parseBooleanEnv('RUNTIME_VOICE_AUTO_REPLY_ENABLED', false);
 const maxInputImageBytes = Math.max(1024, Number(process.env.MAX_INPUT_IMAGE_BYTES) || 8 * 1024 * 1024);
 const maxInputImages = Math.max(0, Number(process.env.MAX_INPUT_IMAGES) || 4);
 const maxInputImageDataUrlChars = Math.max(
@@ -907,11 +906,8 @@ async function enqueueRpc(ws, rpcPayload, mode) {
           ? requestedPermissionLevel
           : existingSettings?.permission_level
       );
-      const voiceAutoReplyEnabled = (
-        typeof existingSettings?.voice_auto_reply_enabled === 'boolean'
-          ? existingSettings.voice_auto_reply_enabled
-          : voiceAutoReplyDefaultEnabled
-      );
+      const voicePolicy = loadVoicePolicy({ policyPath: voicePolicyPath });
+      const voiceAutoReplyEnabled = voicePolicy?.auto_reply?.enabled === true;
       const workspace = await workspaceManager.getWorkspaceInfo(sessionId);
       const normalizedWorkspace = normalizeWorkspaceSettings(workspace);
 

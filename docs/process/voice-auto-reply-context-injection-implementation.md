@@ -3,6 +3,11 @@
 ## Goal
 Add a configurable, opt-in context-injection path so that the model receives a voice auto-reply system instruction only when enabled.
 
+Current control source:
+
+- `config/voice-policy.yaml` -> `voice_policy.auto_reply.enabled`
+- runtime ignores session-level `voice_auto_reply_enabled` for decision making.
+
 ## Scope
 In scope:
 
@@ -29,8 +34,9 @@ Out of scope:
 
 3. Build runtime context with switch
 - File: `apps/gateway/server.js`
-- In `buildRunContext`, resolve switch from session settings with env fallback `RUNTIME_VOICE_AUTO_REPLY_ENABLED`.
-- Persist the resolved value in session settings and return it in `runtimeContext`.
+- In `buildRunContext`, resolve switch from `voice-policy.yaml` only.
+- Ignore session-level switch for runtime decisions.
+- Persist the YAML-derived value in session settings and return it in `runtimeContext`.
 
 4. Inject system prompt conditionally
 - File: `apps/runtime/loop/toolLoopRunner.js`
@@ -46,6 +52,7 @@ Out of scope:
 - `test/integration/gateway.e2e.test.js`
   - session settings API accepts boolean switch and persists.
   - rejects non-boolean switch.
+  - runtime decision follows YAML even when session switch is patched to opposite value.
 
 ## Verification
 Recommended commands:
@@ -60,4 +67,3 @@ Revert commit(s) touching:
 - `apps/gateway/server.js`
 - `apps/runtime/loop/toolLoopRunner.js`
 - related tests/docs
-

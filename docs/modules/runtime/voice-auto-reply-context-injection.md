@@ -9,15 +9,19 @@ When disabled, no voice auto-reply prompt is injected.
 This implementation is context-injection only. It does not enforce tool scheduling or finalization gates.
 
 ## Switch Model
-The switch is stored in session settings as:
+The runtime switch source is:
+
+- `config/voice-policy.yaml` -> `voice_policy.auto_reply.enabled`
+
+The session field is kept for compatibility/observability:
 
 - `voice_auto_reply_enabled: boolean`
 
-Resolution order per run:
+Runtime resolution per run:
 
-1. Existing session setting (`session.settings.voice_auto_reply_enabled`) if present.
-2. Global runtime fallback from env `RUNTIME_VOICE_AUTO_REPLY_ENABLED`.
-3. Default `false`.
+1. Read `voice_policy.auto_reply.enabled` from YAML.
+2. Ignore session-level `voice_auto_reply_enabled` as decision source.
+3. Persist the YAML-derived value back into session settings.
 
 ## Injection Point
 Injection happens in `ToolLoopRunner.run()` while building `ctx.messages`.
@@ -35,7 +39,7 @@ Prompt intent:
 - no more than 5 sentences
 
 ## Affected Runtime Data Flow
-1. Gateway `buildRunContext` resolves and persists the switch.
+1. Gateway `buildRunContext` loads `voice-policy.yaml`, resolves and persists the switch.
 2. `RuntimeRpcWorker` passes `runtimeContext` into `ToolLoopRunner`.
 3. `ToolLoopRunner` conditionally appends a `system` message.
 
@@ -60,4 +64,3 @@ Covered by:
 - `test/runtime/sessionPermissions.test.js`
 - `test/runtime/toolLoopRunner.test.js`
 - `test/integration/gateway.e2e.test.js`
-
