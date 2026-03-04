@@ -146,4 +146,4 @@ CI 配置在 GitHub Actions：`.github/workflows/ci.yml`。
 ## 贡献者
 
 - [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer
-- [wkf16](https://github.com/wkf16) — Contributor
+- [wkf16](https://github.com/wkf16) — Maintainer
