@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'yachiyo_sessions_v1';
 const THEME_STORAGE_KEY = 'yachiyo_theme_v1';
 const SESSION_PERMISSION_LEVELS = ['low', 'medium', 'high'];
-const DEFAULT_SESSION_PERMISSION_LEVEL = 'medium';
+const DEFAULT_SESSION_PERMISSION_LEVEL = 'high';
 const THEME_PREFERENCES = ['auto', 'light', 'dark'];
 const DEFAULT_THEME_PREFERENCE = 'auto';
 const SERVER_SYNC_INTERVAL_MS = 2000;
@@ -11,6 +11,7 @@ const LIGHTBOX_ANIMATION_MS = 220;
 const STREAM_CHUNK_FLUSH_MS = 120;
 const DEBUG_PREFS_KEY = 'yachiyo_debug_panel_v1';
 const DEBUG_MAX_LINES = 500;
+const chatImageUtils = window.ChatImageUtils || {};
 
 const elements = {
   sidebar: document.getElementById('sidebar'),
@@ -142,12 +143,16 @@ function sessionFromServerSummary(summary) {
   };
 }
 
-function messageFromServer(raw) {
+function messageFromServer(raw, sessionId = '') {
+  const normalizedImages = typeof chatImageUtils.normalizeServerMessageImages === 'function'
+    ? chatImageUtils.normalizeServerMessageImages(raw, sessionId)
+    : [];
   return {
     id: raw.id || randomId('msg'),
     role: raw.role || 'assistant',
     content: String(raw.content || ''),
-    createdAt: typeof raw.created_at === 'string' ? raw.created_at : nowIso()
+    createdAt: typeof raw.created_at === 'string' ? raw.created_at : nowIso(),
+    images: normalizedImages
   };
 }
 
@@ -687,6 +692,9 @@ async function toggleDebugMode() {
 }
 
 function extensionFromMimeType(mimeType) {
+  if (typeof chatImageUtils.extensionFromMimeType === 'function') {
+    return chatImageUtils.extensionFromMimeType(mimeType);
+  }
   const normalized = String(mimeType || '').toLowerCase();
   if (normalized === 'image/jpeg' || normalized === 'image/jpg') return 'jpg';
   if (normalized === 'image/png') return 'png';
@@ -698,6 +706,9 @@ function extensionFromMimeType(mimeType) {
 }
 
 function buildSessionImageUrl(sessionId, clientId, mimeType) {
+  if (typeof chatImageUtils.buildSessionImageUrl === 'function') {
+    return chatImageUtils.buildSessionImageUrl(sessionId, clientId, mimeType);
+  }
   if (!sessionId || !clientId) return '';
   const ext = extensionFromMimeType(mimeType);
   return `/api/session-images/${encodeURIComponent(sessionId)}/${encodeURIComponent(`${clientId}.${ext}`)}`;
@@ -1392,7 +1403,7 @@ async function syncSessionDetailFromServer(sessionId) {
   localSession.updatedAt = typeof serverSession.updated_at === 'string' ? serverSession.updated_at : localSession.updatedAt;
   localSession.permissionLevel = normalizePermissionLevel(serverSession.settings?.permission_level || localSession.permissionLevel);
   localSession.messages = Array.isArray(serverSession.messages)
-    ? serverSession.messages.map(messageFromServer)
+    ? serverSession.messages.map((message) => messageFromServer(message, serverSession.session_id))
     : localSession.messages;
 
   return localSession;
@@ -1556,6 +1567,16 @@ function bindEvents() {
 
   elements.chatInput.addEventListener('input', autosizeInput);
   elements.chatInput.addEventListener('input', updateComposerState);
+  elements.chatInput.addEventListener('paste', (event) => {
+    const imageFiles = typeof chatImageUtils.extractImageFilesFromPasteEvent === 'function'
+      ? chatImageUtils.extractImageFilesFromPasteEvent(event)
+      : [];
+    if (imageFiles.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void onImageFilesSelected(imageFiles);
+  });
   elements.chatInput.addEventListener('compositionstart', () => {
     state.isComposing = true;
   });

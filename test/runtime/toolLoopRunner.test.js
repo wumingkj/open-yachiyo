@@ -11,6 +11,17 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+test('ToolLoopRunner default maxStep is 128', () => {
+  const bus = new RuntimeEventBus();
+  const runner = new ToolLoopRunner({
+    bus,
+    getReasoner: () => ({ async decide() { return { type: 'final', output: 'ok' }; } }),
+    listTools: () => []
+  });
+  assert.equal(runner.maxStep, 128);
+  assert.equal(runner.toolErrorMaxRetries, 5);
+});
+
 test('ToolLoopRunner performs tool call through event bus and completes', async () => {
   const bus = new RuntimeEventBus();
   const executor = new ToolExecutor(localTools);
@@ -102,7 +113,8 @@ test('ToolLoopRunner emits seq/runtime flags and returns metrics', async () => {
     streaming_enabled: true,
     tool_async_mode: 'parallel',
     tool_early_dispatch: true,
-    max_parallel_tools: 3
+    max_parallel_tools: 3,
+    tool_error_max_retries: 5
   });
   for (let i = 1; i < events.length; i += 1) {
     assert.equal(events[i].seq, events[i - 1].seq + 1);
@@ -786,6 +798,156 @@ test('ToolLoopRunner returns error when tool dispatch fails', async () => {
   dispatcher.stop();
 });
 
+test('ToolLoopRunner retries after tool error and allows reasoner re-planning', async () => {
+  const bus = new RuntimeEventBus();
+  let flakyAttempts = 0;
+
+  const executor = {
+    listTools() {
+      return [
+        {
+          name: 'flaky_tool',
+          input_schema: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false
+          },
+          side_effect_level: 'write',
+          requires_lock: true
+        }
+      ];
+    },
+    async execute(toolCall) {
+      if (toolCall.name !== 'flaky_tool') {
+        return { ok: false, code: 'TOOL_NOT_FOUND', error: 'unexpected tool' };
+      }
+      flakyAttempts += 1;
+      if (flakyAttempts === 1) {
+        return { ok: false, code: 'RUNTIME_ERROR', error: 'first-run failed' };
+      }
+      return { ok: true, result: 'recovered' };
+    }
+  };
+
+  const dispatcher = new ToolCallDispatcher({ bus, executor });
+  dispatcher.start();
+
+  let step = 0;
+  const reasoner = {
+    async decide({ messages }) {
+      step += 1;
+      if (step === 1) {
+        return {
+          type: 'tool',
+          tool: { call_id: 'flaky-1', name: 'flaky_tool', args: {} }
+        };
+      }
+      if (step === 2) {
+        const retryMsg = messages.find((msg) => msg.role === 'tool' && msg.tool_call_id === 'flaky-1');
+        assert.ok(retryMsg);
+        assert.match(String(retryMsg.content || ''), /"retryable":true/);
+        return {
+          type: 'tool',
+          tool: { call_id: 'flaky-2', name: 'flaky_tool', args: {} }
+        };
+      }
+      return { type: 'final', output: 'retry-success-final' };
+    }
+  };
+
+  const events = [];
+  const runner = new ToolLoopRunner({
+    bus,
+    getReasoner: () => reasoner,
+    listTools: () => executor.listTools(),
+    maxStep: 5,
+    toolResultTimeoutMs: 1000,
+    toolErrorMaxRetries: 5
+  });
+
+  const result = await runner.run({
+    sessionId: 's-retry-replan',
+    input: 'run flaky tool',
+    onEvent: (evt) => events.push(evt)
+  });
+
+  assert.equal(result.state, 'DONE');
+  assert.equal(result.output, 'retry-success-final');
+  assert.equal(flakyAttempts, 2);
+  assert.equal(
+    events.some((evt) => evt.event === 'tool.retry.scheduled' && evt.payload.retry_count === 1),
+    true
+  );
+
+  dispatcher.stop();
+});
+
+test('ToolLoopRunner stops when tool error retries exceed configured limit', async () => {
+  const bus = new RuntimeEventBus();
+  let failingAttempts = 0;
+
+  const executor = {
+    listTools() {
+      return [
+        {
+          name: 'always_fail_tool',
+          input_schema: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false
+          },
+          side_effect_level: 'write',
+          requires_lock: true
+        }
+      ];
+    },
+    async execute() {
+      failingAttempts += 1;
+      return { ok: false, code: 'RUNTIME_ERROR', error: `failed-${failingAttempts}` };
+    }
+  };
+
+  const dispatcher = new ToolCallDispatcher({ bus, executor });
+  dispatcher.start();
+
+  let step = 0;
+  const reasoner = {
+    async decide() {
+      step += 1;
+      return {
+        type: 'tool',
+        tool: { call_id: `fail-${step}`, name: 'always_fail_tool', args: {} }
+      };
+    }
+  };
+
+  const events = [];
+  const runner = new ToolLoopRunner({
+    bus,
+    getReasoner: () => reasoner,
+    listTools: () => executor.listTools(),
+    maxStep: 8,
+    toolResultTimeoutMs: 1000,
+    toolErrorMaxRetries: 2
+  });
+
+  const result = await runner.run({
+    sessionId: 's-retry-limit',
+    input: 'run fail tool',
+    onEvent: (evt) => events.push(evt)
+  });
+
+  assert.equal(result.state, 'ERROR');
+  assert.match(result.output, /最大重试次数 2/);
+  assert.equal(failingAttempts, 3);
+  assert.equal(
+    events.some((evt) => evt.event === 'tool.error' && evt.payload.retry_exhausted === true),
+    true
+  );
+
+  dispatcher.stop();
+});
+
 test('ToolLoopRunner injects seedMessages into reasoner prompt', async () => {
   const bus = new RuntimeEventBus();
   const executor = new ToolExecutor(localTools);
@@ -1158,6 +1320,128 @@ test('ToolLoopRunner injects live2d action planning guidance into system prompt'
   assert.equal(result.output, 'ok-live2d-guidance');
   assert.match(String(seenMessages[0]?.content || ''), /Live2D action/);
   assert.match(String(seenMessages[0]?.content || ''), /duration_sec/);
+
+  dispatcher.stop();
+});
+
+test('ToolLoopRunner continues when shell.exec returns APPROVAL_REQUIRED', async () => {
+  const bus = new RuntimeEventBus();
+  let shellExecAttempts = 0;
+  let seenApprovalId = '';
+
+  const executor = {
+    listTools() {
+      return [
+        {
+          name: 'shell.exec',
+          input_schema: {
+            type: 'object',
+            properties: { command: { type: 'string' } },
+            required: ['command'],
+            additionalProperties: false
+          },
+          side_effect_level: 'write',
+          requires_lock: true
+        },
+        {
+          name: 'shell.approve',
+          input_schema: {
+            type: 'object',
+            properties: {
+              approval_id: { type: 'string' },
+              scope: { type: 'string', enum: ['once', 'always'] }
+            },
+            required: ['approval_id'],
+            additionalProperties: false
+          },
+          side_effect_level: 'write',
+          requires_lock: true
+        }
+      ];
+    },
+    async execute(toolCall) {
+      if (toolCall.name === 'shell.exec') {
+        shellExecAttempts += 1;
+        if (shellExecAttempts === 1) {
+          seenApprovalId = 'apr-loop-1';
+          return {
+            ok: false,
+            code: 'APPROVAL_REQUIRED',
+            error: 'shell command requires approval before execution',
+            details: { approval_id: seenApprovalId }
+          };
+        }
+        return { ok: true, result: 'retry-success' };
+      }
+      if (toolCall.name === 'shell.approve') {
+        assert.equal(toolCall.args.approval_id, seenApprovalId);
+        return { ok: true, result: '{"status":"approved"}' };
+      }
+      return { ok: false, code: 'TOOL_NOT_FOUND', error: 'unexpected tool' };
+    }
+  };
+
+  const dispatcher = new ToolCallDispatcher({ bus, executor });
+  dispatcher.start();
+
+  let step = 0;
+  const reasoner = {
+    async decide({ messages }) {
+      step += 1;
+      if (step === 1) {
+        return {
+          type: 'tool',
+          tool: { call_id: 'shell-call-1', name: 'shell.exec', args: { command: 'echo hi || true' } }
+        };
+      }
+      if (step === 2) {
+        const approvalToolMessage = messages.find(
+          (msg) => msg.role === 'tool' && msg.tool_call_id === 'shell-call-1'
+        );
+        assert.ok(approvalToolMessage);
+        assert.match(String(approvalToolMessage.content || ''), /APPROVAL_REQUIRED/);
+        return {
+          type: 'tool',
+          tool: { call_id: 'shell-approve-1', name: 'shell.approve', args: { approval_id: seenApprovalId, scope: 'once' } }
+        };
+      }
+      if (step === 3) {
+        return {
+          type: 'tool',
+          tool: { call_id: 'shell-call-2', name: 'shell.exec', args: { command: 'echo hi || true' } }
+        };
+      }
+      return { type: 'final', output: 'approval-flow-done' };
+    }
+  };
+
+  const events = [];
+  const runner = new ToolLoopRunner({
+    bus,
+    getReasoner: () => reasoner,
+    listTools: () => executor.listTools(),
+    maxStep: 6,
+    toolResultTimeoutMs: 2000
+  });
+
+  const result = await runner.run({
+    sessionId: 's-shell-approval-loop',
+    input: 'run shell command',
+    onEvent: (evt) => events.push(evt)
+  });
+
+  assert.equal(result.state, 'DONE');
+  assert.equal(result.output, 'approval-flow-done');
+  assert.equal(shellExecAttempts, 2);
+  assert.equal(events.some((evt) => evt.event === 'tool.error'), false);
+  assert.equal(
+    events.some(
+      (evt) => evt.event === 'tool.result'
+        && evt.payload.code === 'APPROVAL_REQUIRED'
+        && evt.payload.approval_required === true
+    ),
+    true
+  );
 
   dispatcher.stop();
 });

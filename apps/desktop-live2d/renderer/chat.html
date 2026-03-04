@@ -89,6 +89,75 @@
         background: rgba(255, 255, 255, 0.16);
       }
 
+      .chat-message-images {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .chat-image-card {
+        width: 136px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.22);
+        color: #edf4ff;
+        padding: 0;
+        overflow: hidden;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .chat-image-card:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .chat-image-thumb {
+        width: 100%;
+        height: 84px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        object-fit: cover;
+        background: rgba(255, 255, 255, 0.08);
+        font-size: 22px;
+      }
+
+      .chat-image-meta {
+        padding: 6px 7px;
+        font-size: 10px;
+        line-height: 1.4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .chat-message-images.compact {
+        flex-direction: column;
+      }
+
+      .chat-image-chip {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #edf4ff;
+        padding: 4px 7px;
+        text-align: left;
+        font-size: 11px;
+        line-height: 1.3;
+        cursor: pointer;
+      }
+
+      .chat-image-chip:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      #chat-panel.compact .chat-message {
+        font-size: 11px;
+      }
+
       .chat-message.user {
         background: rgba(93, 150, 255, 0.32);
       }
@@ -110,6 +179,12 @@
         padding: 8px;
         border-top: 1px solid rgba(255, 255, 255, 0.1);
         display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #chat-composer-input-row {
+        display: flex;
         gap: 8px;
       }
 
@@ -124,6 +199,7 @@
         outline: none;
       }
 
+      #chat-image-pick,
       #chat-send {
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 8px;
@@ -134,10 +210,75 @@
         cursor: pointer;
       }
 
+      #chat-image-pick {
+        padding: 0 8px;
+        min-width: 44px;
+      }
+
+      #chat-image-input {
+        display: none;
+      }
+
       #chat-send:disabled,
+      #chat-image-pick:disabled,
       #chat-input:disabled {
         opacity: 0.5;
         cursor: default;
+      }
+
+      #chat-upload-preview {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 100px;
+        overflow: auto;
+      }
+
+      .chat-upload-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .chat-upload-thumb {
+        width: 30px;
+        height: 30px;
+        object-fit: cover;
+        border-radius: 6px;
+      }
+
+      .chat-upload-meta {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      .chat-upload-name {
+        font-size: 11px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+
+      .chat-upload-size {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.75);
+      }
+
+      .chat-upload-remove {
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 6px;
+        padding: 2px 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f3f8ff;
+        font-size: 10px;
+        cursor: pointer;
+      }
+
+      .chat-upload-remove:hover {
+        background: rgba(255, 255, 255, 0.16);
       }
 
       /* Markdown styles */
@@ -306,8 +447,13 @@
       </div>
       <div id="chat-panel-messages"></div>
       <div id="chat-panel-composer">
-        <input id="chat-input" type="text" maxlength="4000" placeholder="Type message..." />
-        <button id="chat-send" type="button">Send</button>
+        <div id="chat-composer-input-row">
+          <button id="chat-image-pick" type="button" title="Upload image">Image</button>
+          <input id="chat-input" type="text" maxlength="4000" placeholder="Type message..." />
+          <button id="chat-send" type="button">Send</button>
+        </div>
+        <input id="chat-image-input" type="file" accept="image/*" multiple />
+        <div id="chat-upload-preview"></div>
       </div>
     </div>
     <script src="./chat.js"></script>

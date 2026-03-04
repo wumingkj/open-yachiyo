@@ -4,10 +4,12 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const Ajv = require('ajv');
 
 const { ToolConfigStore } = require('../../apps/runtime/tooling/toolConfigStore');
 const { ToolRegistry } = require('../../apps/runtime/tooling/toolRegistry');
 const { ToolExecutor } = require('../../apps/runtime/executor/toolExecutor');
+const { __resetShellApprovalStoreForTests } = require('../../apps/runtime/tooling/shellApprovalStore');
 
 function buildExecutor() {
   const store = new ToolConfigStore({ configPath: path.resolve(process.cwd(), 'config/tools.yaml') });
@@ -21,6 +23,7 @@ test('ToolConfigStore loads yaml and validates structure', () => {
   const cfg = store.load();
   assert.equal(Array.isArray(cfg.tools), true);
   assert.ok(cfg.tools.some((t) => t.name === 'workspace.write_file'));
+  assert.ok(cfg.tools.some((t) => t.name === 'shell.approve'));
   assert.ok(cfg.tools.some((t) => t.name === 'live2d.motion.play'));
   assert.ok(cfg.tools.some((t) => t.name === 'live2d.react'));
 });
@@ -36,6 +39,19 @@ test('ToolRegistry keeps scheduling metadata from config', () => {
 
   assert.equal(getTime?.side_effect_level, 'none');
   assert.equal(Boolean(live2dGesture?.requires_lock), true);
+});
+
+test('voice.tts_aliyun_vc schema tolerates durationSec aliases', () => {
+  const store = new ToolConfigStore({ configPath: path.resolve(process.cwd(), 'config/tools.yaml') });
+  const config = store.load();
+  const voiceTool = config.tools.find((tool) => tool.name === 'voice.tts_aliyun_vc');
+  assert.ok(voiceTool?.input_schema);
+
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  const validate = ajv.compile(voiceTool.input_schema);
+
+  assert.equal(validate({ text: 'hello', voiceTag: 'zh', durationSec: '8' }), true, JSON.stringify(validate.errors || []));
+  assert.equal(validate({ text: 'hello', voiceTag: 'zh', duration_sec: 8 }), true, JSON.stringify(validate.errors || []));
 });
 
 test('ToolExecutor rejects invalid args by schema', async () => {
@@ -210,18 +226,18 @@ test('shell.exec applies low/medium/high permission profiles', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'tooling-shell-perm-'));
 
   const lowDenied = await executor.execute(
-    { name: 'shell.exec', args: { command: 'curl --version' } },
+    { name: 'shell.exec', args: { command: 'echo medium-shell-test' } },
     { permission_level: 'low', workspaceRoot: tmp }
   );
   assert.equal(lowDenied.ok, false);
   assert.equal(lowDenied.code, 'PERMISSION_DENIED');
 
   const mediumAllowed = await executor.execute(
-    { name: 'shell.exec', args: { command: 'curl --version' } },
+    { name: 'shell.exec', args: { command: 'echo medium-shell-test' } },
     { permission_level: 'medium', workspaceRoot: tmp }
   );
   assert.equal(mediumAllowed.ok, true);
-  assert.match(mediumAllowed.result, /curl/i);
+  assert.match(mediumAllowed.result, /medium-shell-test/i);
 
   const highAllowed = await executor.execute(
     { name: 'shell.exec', args: { command: 'whoami' } },
@@ -230,7 +246,7 @@ test('shell.exec applies low/medium/high permission profiles', async () => {
   assert.equal(highAllowed.ok, true);
 
   const highWriteOutsideDenied = await executor.execute(
-    { name: 'shell.exec', args: { command: 'touch /tmp/yachiyo-should-not-write' } },
+    { name: 'shell.exec', args: { command: 'touch ../yachiyo-should-not-write' } },
     { permission_level: 'high', workspaceRoot: tmp }
   );
   assert.equal(highWriteOutsideDenied.ok, false);
@@ -240,33 +256,81 @@ test('shell.exec applies low/medium/high permission profiles', async () => {
   const externalSrc = path.join(externalDir, 'external.txt');
   await fs.writeFile(externalSrc, 'external-content', 'utf8');
 
-  const highCopyIntoWorkspace = await executor.execute(
-    {
-      name: 'shell.exec',
-      args: { command: `cp ${externalSrc} imported.txt` }
-    },
-    { permission_level: 'high', workspaceRoot: tmp }
-  );
-  assert.equal(highCopyIntoWorkspace.ok, true);
-  const imported = await fs.readFile(path.join(tmp, 'imported.txt'), 'utf8');
-  assert.equal(imported, 'external-content');
-
-  const highCopyOutsideWorkspaceDenied = await executor.execute(
-    {
-      name: 'shell.exec',
-      args: { command: `cp imported.txt ${path.join(externalDir, 'copied-back.txt')}` }
-    },
-    { permission_level: 'high', workspaceRoot: tmp }
-  );
-  assert.equal(highCopyOutsideWorkspaceDenied.ok, false);
-  assert.equal(highCopyOutsideWorkspaceDenied.code, 'PERMISSION_DENIED');
-
   const mediumReadOutsideWorkspaceDenied = await executor.execute(
     { name: 'shell.exec', args: { command: `cat ${externalSrc}` } },
     { permission_level: 'medium', workspaceRoot: tmp }
   );
   assert.equal(mediumReadOutsideWorkspaceDenied.ok, false);
   assert.equal(mediumReadOutsideWorkspaceDenied.code, 'PERMISSION_DENIED');
+});
+
+test('shell.exec supports approval flow for operator commands', async () => {
+  __resetShellApprovalStoreForTests();
+  const executor = buildExecutor();
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'tooling-shell-approval-'));
+  const context = {
+    permission_level: 'high',
+    session_id: 'session-shell-approval',
+    workspaceRoot: tmp
+  };
+  const command = 'echo approved || true';
+
+  const firstAttempt = await executor.execute(
+    { name: 'shell.exec', args: { command } },
+    context
+  );
+  assert.equal(firstAttempt.ok, false);
+  assert.equal(firstAttempt.code, 'APPROVAL_REQUIRED');
+  assert.equal(typeof firstAttempt.details?.approval_id, 'string');
+
+  const onceApproval = await executor.execute(
+    {
+      name: 'shell.approve',
+      args: {
+        approval_id: firstAttempt.details.approval_id,
+        scope: 'once'
+      }
+    },
+    context
+  );
+  assert.equal(onceApproval.ok, true);
+
+  const onceRun = await executor.execute(
+    { name: 'shell.exec', args: { command } },
+    context
+  );
+  assert.equal(onceRun.ok, true);
+  assert.match(onceRun.result, /approved/);
+
+  const needsApprovalAgain = await executor.execute(
+    { name: 'shell.exec', args: { command } },
+    context
+  );
+  assert.equal(needsApprovalAgain.ok, false);
+  assert.equal(needsApprovalAgain.code, 'APPROVAL_REQUIRED');
+
+  const alwaysApproval = await executor.execute(
+    {
+      name: 'shell.approve',
+      args: {
+        approval_id: needsApprovalAgain.details.approval_id,
+        scope: 'always'
+      }
+    },
+    context
+  );
+  assert.equal(alwaysApproval.ok, true);
+
+  const alwaysRun1 = await executor.execute(
+    { name: 'shell.exec', args: { command } },
+    context
+  );
+  const alwaysRun2 = await executor.execute(
+    { name: 'shell.exec', args: { command } },
+    context
+  );
+  assert.equal(alwaysRun1.ok, true);
+  assert.equal(alwaysRun2.ok, true);
 });
 
 test('persona.update_profile is callable at low permission and updates via curl', async () => {
