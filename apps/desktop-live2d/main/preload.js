@@ -10,6 +10,7 @@ const CHANNELS = {
   chatPanelToggle: 'live2d:chat:panel-toggle',
   chatStateSync: 'live2d:chat:state-sync',
   chatStreamSync: 'live2d:chat:stream-sync',
+  chatImagePreviewOpen: 'live2d:chat:image-preview-open',
   bubbleStateSync: 'live2d:bubble:state-sync',
   bubbleMetricsUpdate: 'live2d:bubble:metrics-update',
   modelBoundsUpdate: 'live2d:model:bounds-update',
@@ -42,6 +43,9 @@ contextBridge.exposeInMainWorld('desktopLive2dBridge', {
   },
   sendChatPanelToggle(payload = {}) {
     ipcRenderer.send(CHANNELS.chatPanelToggle, payload);
+  },
+  sendChatImagePreviewOpen(payload = {}) {
+    ipcRenderer.send(CHANNELS.chatImagePreviewOpen, payload);
   },
   sendModelBounds(payload = {}) {
     ipcRenderer.send(CHANNELS.modelBoundsUpdate, payload);

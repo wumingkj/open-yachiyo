@@ -1,15 +1,24 @@
 (function chatWindowMain() {
   const bridge = window.desktopLive2dBridge;
+  const chatPanelElement = document.getElementById('chat-panel');
   const messagesElement = document.getElementById('chat-panel-messages');
   const chatInputElement = document.getElementById('chat-input');
   const chatSendElement = document.getElementById('chat-send');
+  const chatImagePickElement = document.getElementById('chat-image-pick');
+  const chatImageInputElement = document.getElementById('chat-image-input');
+  const chatUploadPreviewElement = document.getElementById('chat-upload-preview');
   const chatComposerElement = document.getElementById('chat-panel-composer');
   const chatHideElement = document.getElementById('chat-hide');
   const openWebUiElement = document.getElementById('open-webui');
+  const MAX_UPLOAD_IMAGES = 4;
+  const MAX_UPLOAD_IMAGE_BYTES = 8 * 1024 * 1024;
+  const COMPACT_CHAT_WIDTH = 520;
 
   const state = {
     inputEnabled: true,
     messages: [],
+    compact: false,
+    pendingUploads: [],
     stream: {
       active: false,
       sessionId: null,
@@ -30,11 +39,116 @@
     return allowedRoles.has(normalized) ? normalized : 'assistant';
   }
 
+  function normalizeMessageImages(rawImages) {
+    if (!Array.isArray(rawImages)) {
+      return [];
+    }
+    const normalized = [];
+    for (const image of rawImages) {
+      if (!image || typeof image !== 'object' || Array.isArray(image)) {
+        continue;
+      }
+      const name = String(image.name || 'image').trim() || 'image';
+      const mimeType = String(image.mimeType || image.mime_type || '').trim() || 'image/*';
+      const sizeBytes = Math.max(0, Number(image.sizeBytes ?? image.size_bytes) || 0);
+      const url = String(image.url || '').trim();
+      const dataUrl = String(image.dataUrl || image.data_url || '').trim();
+      const previewUrl = String(image.previewUrl || image.preview_url || url || dataUrl).trim();
+      normalized.push({
+        name,
+        mimeType,
+        sizeBytes,
+        url,
+        previewUrl,
+        dataUrl
+      });
+      if (normalized.length >= 8) {
+        break;
+      }
+    }
+    return normalized;
+  }
+
+  function normalizeMessage(rawMessage) {
+    if (!rawMessage || typeof rawMessage !== 'object' || Array.isArray(rawMessage)) {
+      return {
+        role: 'assistant',
+        text: '',
+        timestamp: Date.now(),
+        images: []
+      };
+    }
+    return {
+      ...rawMessage,
+      role: normalizeRole(rawMessage.role),
+      text: String(rawMessage.text || ''),
+      timestamp: Number.isFinite(Number(rawMessage.timestamp)) ? Number(rawMessage.timestamp) : Date.now(),
+      images: normalizeMessageImages(rawMessage.images)
+    };
+  }
+
+  function imagePreviewSource(image) {
+    return String(image?.previewUrl || image?.dataUrl || image?.url || '').trim();
+  }
+
+  function applyCompactLayout(width) {
+    const nextCompact = Number(width) > 0 && Number(width) < COMPACT_CHAT_WIDTH;
+    state.compact = nextCompact;
+    if (chatPanelElement) {
+      chatPanelElement.classList.toggle('compact', nextCompact);
+    }
+    return nextCompact;
+  }
+
+  function syncCompactLayout() {
+    const nextWidth = Number(chatPanelElement?.clientWidth) || Number(window.innerWidth) || 0;
+    return applyCompactLayout(nextWidth);
+  }
+
   function scrollMessagesToBottom() {
     if (!messagesElement) {
       return;
     }
     messagesElement.scrollTop = messagesElement.scrollHeight;
+  }
+
+  function randomId(prefix = 'id') {
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function formatBytes(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error(`read file failed: ${file?.name || 'unknown'}`));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function updateComposerState() {
+    const hasText = String(chatInputElement?.value || '').trim().length > 0;
+    const hasUploads = state.pendingUploads.length > 0;
+    const canSubmit = state.inputEnabled && (hasText || hasUploads);
+
+    if (chatComposerElement) {
+      chatComposerElement.style.display = state.inputEnabled ? 'flex' : 'none';
+    }
+    if (chatInputElement) {
+      chatInputElement.disabled = !state.inputEnabled;
+    }
+    if (chatImagePickElement) {
+      chatImagePickElement.disabled = !state.inputEnabled;
+    }
+    if (chatSendElement) {
+      chatSendElement.disabled = !canSubmit;
+    }
   }
 
   function clearStreamingPreviewNode() {
@@ -217,6 +331,78 @@
       .replaceAll("'", '&#39;');
   }
 
+  function renderUploadPreview() {
+    if (!chatUploadPreviewElement) {
+      return;
+    }
+    chatUploadPreviewElement.innerHTML = '';
+    for (const upload of state.pendingUploads) {
+      const item = document.createElement('div');
+      item.className = 'chat-upload-item';
+      item.innerHTML = `
+        <img class="chat-upload-thumb" src="${escapeHtml(upload.dataUrl)}" alt="${escapeHtml(upload.name)}" />
+        <div class="chat-upload-meta">
+          <div class="chat-upload-name">${escapeHtml(upload.name)}</div>
+          <div class="chat-upload-size">${escapeHtml(upload.mimeType)} · ${escapeHtml(formatBytes(upload.sizeBytes))}</div>
+        </div>
+        <button class="chat-upload-remove" type="button" data-upload-id="${escapeHtml(upload.id)}">Remove</button>
+      `;
+      chatUploadPreviewElement.appendChild(item);
+    }
+  }
+
+  function removePendingUpload(uploadId) {
+    state.pendingUploads = state.pendingUploads.filter((upload) => upload.id !== uploadId);
+    renderUploadPreview();
+    updateComposerState();
+  }
+
+  function clearPendingUploads() {
+    state.pendingUploads = [];
+    if (chatImageInputElement) {
+      chatImageInputElement.value = '';
+    }
+    renderUploadPreview();
+    updateComposerState();
+  }
+
+  async function onImageFilesSelected(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) {
+      return;
+    }
+    const remaining = Math.max(0, MAX_UPLOAD_IMAGES - state.pendingUploads.length);
+    if (remaining <= 0) {
+      return;
+    }
+    for (const file of files.slice(0, remaining)) {
+      if (!String(file?.type || '').startsWith('image/')) {
+        continue;
+      }
+      if (Number(file?.size || 0) > MAX_UPLOAD_IMAGE_BYTES) {
+        continue;
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        state.pendingUploads.push({
+          id: randomId('upload'),
+          clientId: randomId('imgc'),
+          name: String(file.name || 'image'),
+          mimeType: String(file.type || 'image/*'),
+          sizeBytes: Number(file.size || 0),
+          dataUrl
+        });
+      } catch (err) {
+        console.error('Failed to read image file:', err);
+      }
+    }
+    if (chatImageInputElement) {
+      chatImageInputElement.value = '';
+    }
+    renderUploadPreview();
+    updateComposerState();
+  }
+
   async function renderMarkdownWithMermaid(text) {
     if (typeof marked === 'undefined') {
       return text;
@@ -369,6 +555,67 @@
     </div>`;
   }
 
+  function buildCompactImageItem(image, index) {
+    const button = document.createElement('button');
+    const previewSrc = imagePreviewSource(image);
+    button.type = 'button';
+    button.className = 'chat-image-chip';
+    button.setAttribute('data-chat-image', '1');
+    button.setAttribute('data-preview-src', previewSrc);
+    button.setAttribute('data-image-name', String(image.name || `image-${index + 1}`));
+    button.setAttribute('data-image-mime', String(image.mimeType || 'image/*'));
+    button.setAttribute('data-image-size', String(image.sizeBytes || 0));
+    button.textContent = `🖼 ${image.name || `image-${index + 1}`}`;
+    if (!previewSrc) {
+      button.disabled = true;
+    }
+    return button;
+  }
+
+  function buildLargeImageItem(image, index) {
+    const button = document.createElement('button');
+    const previewSrc = imagePreviewSource(image);
+    button.type = 'button';
+    button.className = 'chat-image-card';
+    button.setAttribute('data-chat-image', '1');
+    button.setAttribute('data-preview-src', previewSrc);
+    button.setAttribute('data-image-name', String(image.name || `image-${index + 1}`));
+    button.setAttribute('data-image-mime', String(image.mimeType || 'image/*'));
+    button.setAttribute('data-image-size', String(image.sizeBytes || 0));
+
+    const thumb = document.createElement(previewSrc ? 'img' : 'div');
+    thumb.className = 'chat-image-thumb';
+    if (previewSrc) {
+      thumb.src = previewSrc;
+      thumb.alt = String(image.name || `image-${index + 1}`);
+    } else {
+      thumb.textContent = '🖼';
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'chat-image-meta';
+    meta.textContent = `${String(image.name || `image-${index + 1}`)} · ${formatBytes(image.sizeBytes)}`;
+
+    button.appendChild(thumb);
+    button.appendChild(meta);
+    if (!previewSrc) {
+      button.disabled = true;
+    }
+    return button;
+  }
+
+  function buildMessageImages(images) {
+    const wrapper = document.createElement('div');
+    wrapper.className = state.compact ? 'chat-message-images compact' : 'chat-message-images';
+    images.forEach((image, index) => {
+      const item = state.compact
+        ? buildCompactImageItem(image, index)
+        : buildLargeImageItem(image, index);
+      wrapper.appendChild(item);
+    });
+    return wrapper;
+  }
+
   async function renderMessages() {
     if (!messagesElement) {
       return;
@@ -392,6 +639,10 @@
         node.innerHTML = await renderMarkdownWithMermaid(content);
       }
 
+      if (Array.isArray(message.images) && message.images.length > 0) {
+        node.appendChild(buildMessageImages(message.images));
+      }
+
       fragment.appendChild(node);
     }
     messagesElement.appendChild(fragment);
@@ -405,17 +656,10 @@
   async function applyChatState(payload) {
     const nextInputEnabled = payload?.inputEnabled !== false;
     state.inputEnabled = nextInputEnabled;
-    state.messages = Array.isArray(payload?.messages) ? payload.messages : [];
-
-    if (chatComposerElement) {
-      chatComposerElement.style.display = nextInputEnabled ? 'flex' : 'none';
-    }
-    if (chatInputElement) {
-      chatInputElement.disabled = !nextInputEnabled;
-    }
-    if (chatSendElement) {
-      chatSendElement.disabled = !nextInputEnabled;
-    }
+    state.messages = Array.isArray(payload?.messages)
+      ? payload.messages.map((message) => normalizeMessage(message))
+      : [];
+    updateComposerState();
     await renderMessages();
     flushStreamingPreviewDelta();
     renderStreamingPreview();
@@ -426,12 +670,20 @@
       return;
     }
     const text = String(chatInputElement?.value || '').trim();
-    if (!text) {
+    const uploads = [...state.pendingUploads];
+    if (!text && uploads.length === 0) {
       return;
     }
     bridge?.sendChatInput?.({
       role: 'user',
       text,
+      input_images: uploads.map((upload) => ({
+        client_id: upload.clientId,
+        name: upload.name,
+        mime_type: upload.mimeType,
+        size_bytes: upload.sizeBytes,
+        data_url: upload.dataUrl
+      })),
       timestamp: Date.now(),
       source: 'chat-panel-window'
     });
@@ -439,6 +691,8 @@
       chatInputElement.value = '';
       chatInputElement.focus();
     }
+    clearPendingUploads();
+    updateComposerState();
   }
 
   bridge?.onChatStateSync?.((payload) => {
@@ -451,6 +705,53 @@
   });
 
   chatSendElement?.addEventListener('click', submitInput);
+  chatImagePickElement?.addEventListener('click', () => {
+    if (!state.inputEnabled) {
+      return;
+    }
+    chatImageInputElement?.click();
+  });
+  chatImageInputElement?.addEventListener('change', () => {
+    void onImageFilesSelected(chatImageInputElement?.files);
+  });
+  chatUploadPreviewElement?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const button = target.closest('[data-upload-id]');
+    if (!button) {
+      return;
+    }
+    const uploadId = String(button.getAttribute('data-upload-id') || '');
+    if (!uploadId) {
+      return;
+    }
+    removePendingUpload(uploadId);
+  });
+  messagesElement?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const trigger = target.closest('[data-chat-image="1"]');
+    if (!trigger) {
+      return;
+    }
+    const imageUrl = String(trigger.getAttribute('data-preview-src') || '').trim();
+    if (!imageUrl) {
+      return;
+    }
+    bridge?.sendChatImagePreviewOpen?.({
+      url: imageUrl,
+      name: String(trigger.getAttribute('data-image-name') || 'image'),
+      mime_type: String(trigger.getAttribute('data-image-mime') || 'image/*'),
+      size_bytes: Number(trigger.getAttribute('data-image-size') || 0)
+    });
+  });
+  chatInputElement?.addEventListener('input', () => {
+    updateComposerState();
+  });
   chatInputElement?.addEventListener('compositionstart', () => {
     chatInputComposing = true;
   });
@@ -470,6 +771,18 @@
     event.preventDefault();
     submitInput();
   });
+  chatInputElement?.addEventListener('paste', (event) => {
+    const clipboardItems = Array.from(event.clipboardData?.items || []);
+    const imageFiles = clipboardItems
+      .filter((item) => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (imageFiles.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void onImageFilesSelected(imageFiles);
+  });
 
   chatHideElement?.addEventListener('click', () => {
     bridge?.sendWindowControl?.({ action: 'hide_chat' });
@@ -477,4 +790,25 @@
   openWebUiElement?.addEventListener('click', () => {
     bridge?.sendWindowControl?.({ action: 'open_webui' });
   });
+  syncCompactLayout();
+  if (typeof ResizeObserver === 'function' && chatPanelElement) {
+    const observer = new ResizeObserver(() => {
+      const previous = state.compact;
+      const next = syncCompactLayout();
+      if (previous !== next) {
+        void renderMessages();
+      }
+    });
+    observer.observe(chatPanelElement);
+  } else {
+    window.addEventListener('resize', () => {
+      const previous = state.compact;
+      const next = syncCompactLayout();
+      if (previous !== next) {
+        void renderMessages();
+      }
+    });
+  }
+  updateComposerState();
+  renderUploadPreview();
 })();

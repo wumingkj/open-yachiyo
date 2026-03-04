@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const YAML = require('yaml');
 
 const { resolveDesktopLive2dConfig, upsertDesktopLive2dLayoutOverrides, DEFAULT_UI_CONFIG } = require('./config');
@@ -27,6 +28,7 @@ const CHANNELS = Object.freeze({
   chatPanelToggle: 'live2d:chat:panel-toggle',
   chatStateSync: 'live2d:chat:state-sync',
   chatStreamSync: 'live2d:chat:stream-sync',
+  chatImagePreviewOpen: 'live2d:chat:image-preview-open',
   bubbleStateSync: 'live2d:bubble:state-sync',
   bubbleMetricsUpdate: 'live2d:bubble:metrics-update',
   modelBoundsUpdate: 'live2d:model:bounds-update',
@@ -1527,6 +1529,7 @@ async function startDesktopSuite({
     height: bubbleRuntimeConfig.height
   };
   let bubbleHideTimer = null;
+  let imagePreviewWindow = null;
   const fitWindowConfig = {
     enabled: true,
     minWidth: windowMetrics.minWidth,
@@ -1537,6 +1540,129 @@ async function startDesktopSuite({
     paddingTop: 8,
     paddingBottom: 4
   };
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function formatImageSize(sizeBytes) {
+    const bytes = Math.max(0, Number(sizeBytes) || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function buildImagePreviewHtml(payload) {
+    const safeName = escapeHtml(payload.name || 'image');
+    const safeMime = escapeHtml(payload.mimeType || 'image/*');
+    const safeSize = escapeHtml(formatImageSize(payload.sizeBytes));
+    const safeUrl = escapeHtml(payload.imageUrl);
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${safeName}</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #0b1220;
+      color: #e5efff;
+      font-family: "SF Pro Text", "PingFang SC", sans-serif;
+      overflow: hidden;
+    }
+    .preview-root {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview-meta {
+      flex: 0 0 auto;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      font-size: 12px;
+      color: rgba(229, 239, 255, 0.88);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .preview-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      overflow: auto;
+    }
+    .preview-body img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4);
+      object-fit: contain;
+      background: rgba(255, 255, 255, 0.04);
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-root">
+    <div class="preview-meta">${safeName} · ${safeMime} · ${safeSize}</div>
+    <div class="preview-body">
+      <img src="${safeUrl}" alt="${safeName}" />
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  function ensureImagePreviewWindow() {
+    if (imagePreviewWindow && !imagePreviewWindow.isDestroyed()) {
+      return imagePreviewWindow;
+    }
+    imagePreviewWindow = new BrowserWindow({
+      width: 900,
+      height: 680,
+      minWidth: 420,
+      minHeight: 320,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#0b1220',
+      title: 'Image Preview',
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    });
+    imagePreviewWindow.on('closed', () => {
+      imagePreviewWindow = null;
+    });
+    return imagePreviewWindow;
+  }
+
+  async function openChatImagePreview(rawPayload) {
+    const payload = normalizeChatImagePreviewPayload(rawPayload, { gatewayUrl: config.gatewayUrl });
+    if (!payload) {
+      return { ok: false, reason: 'invalid_payload' };
+    }
+    const targetWindow = ensureImagePreviewWindow();
+    const html = buildImagePreviewHtml(payload);
+    await targetWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    if (!targetWindow.isVisible()) {
+      targetWindow.show();
+    }
+    targetWindow.focus();
+    return { ok: true };
+  }
 
   function buildChatStateSnapshot() {
     return {
@@ -1702,14 +1828,16 @@ async function startDesktopSuite({
 
   function appendChatMessage(params, fallbackRole = 'assistant') {
     const text = String(params?.text || '').trim();
-    if (!text) {
+    const images = normalizeChatMessageImages(params?.images);
+    if (!text && images.length === 0) {
       return { ok: false, count: chatState.messages.length };
     }
     const role = String(params?.role || fallbackRole || 'assistant');
     const message = {
       role,
       text,
-      timestamp: Number.isFinite(Number(params?.timestamp)) ? Number(params.timestamp) : Date.now()
+      timestamp: Number.isFinite(Number(params?.timestamp)) ? Number(params.timestamp) : Date.now(),
+      images
     };
     chatState.messages = chatState.messages.concat(message);
     if (chatState.messages.length > chatState.maxMessages) {
@@ -2448,6 +2576,17 @@ async function startDesktopSuite({
     }
   });
   ipcMain.on(CHANNELS.chatPanelToggle, chatPanelToggleListener);
+  const chatImagePreviewListener = (event, payload) => {
+    if (chatWindow.isDestroyed() || event?.sender !== chatWindow.webContents) {
+      return;
+    }
+    void openChatImagePreview(payload).catch((err) => {
+      logger.warn?.('[desktop-live2d] open chat image preview failed', {
+        error: err?.message || String(err || 'unknown error')
+      });
+    });
+  };
+  ipcMain.on(CHANNELS.chatImagePreviewOpen, chatImagePreviewListener);
   const modelBoundsListener = createModelBoundsListener({
     window: avatarWindow,
     onModelBounds: (modelBounds) => {
@@ -2717,11 +2856,11 @@ async function startDesktopSuite({
     session_id: initialSessionId
   });
   try {
-    await gatewayRuntimeClient.ensureSession({ sessionId: initialSessionId, permissionLevel: 'medium' });
+    await gatewayRuntimeClient.ensureSession({ sessionId: initialSessionId, permissionLevel: 'high' });
     logger.info?.('[desktop-live2d] gateway_session_bootstrap_ok', { sessionId: initialSessionId });
     emitDesktopDebug('chain.electron.session.bootstrap_ok', 'electron main ensured initial session', {
       session_id: initialSessionId,
-      permission_level: 'medium'
+      permission_level: 'high'
     });
   } catch (err) {
     logger.error?.('[desktop-live2d] gateway_session_bootstrap_failed', err);
@@ -2737,10 +2876,17 @@ async function startDesktopSuite({
   const chatInputListener = createChatInputListener({
     logger,
     onChatInput: (payload) => {
-      const isNewSession = isNewSessionCommand(payload.text);
+      const text = String(payload?.text || '').trim();
+      const inputImages = Array.isArray(payload?.input_images) ? payload.input_images : [];
+      const isNewSession = isNewSessionCommand(text);
+      const imageLabel = inputImages.length > 1 ? `[Images x${inputImages.length}]` : '[Image]';
+      const userDisplayText = text && inputImages.length > 0
+        ? `${text}\n${imageLabel}`
+        : (text || (inputImages.length > 0 ? imageLabel : ''));
       emitDesktopDebug('chain.electron.chat_input.received', 'electron main received chat input', {
         session_id: gatewayRuntimeClient.getSessionId(),
-        input_chars: String(payload?.text || '').trim().length,
+        input_chars: text.length,
+        input_images: inputImages.length,
         is_new_session_command: isNewSession
       });
       if (typeof onChatInput === 'function') {
@@ -2748,19 +2894,20 @@ async function startDesktopSuite({
       }
       appendChatMessage({
         role: 'user',
-        text: payload.text,
-        timestamp: payload.timestamp
+        text: userDisplayText,
+        timestamp: payload.timestamp,
+        images: inputImages
       }, 'user');
 
       if (isNewSession) {
         emitDesktopDebug('chain.electron.session.new_command', 'electron main handling /new session command', {
           previous_session_id: gatewayRuntimeClient.getSessionId()
         });
-        void gatewayRuntimeClient.createAndUseNewSession({ permissionLevel: 'medium' }).then((sessionId) => {
+        void gatewayRuntimeClient.createAndUseNewSession({ permissionLevel: 'high' }).then((sessionId) => {
           logger.info?.('[desktop-live2d] gateway_session_switched', { sessionId });
           emitDesktopDebug('chain.electron.session.switched', 'electron main switched to new session', {
             session_id: sessionId,
-            permission_level: 'medium'
+            permission_level: 'high'
           });
           rpcServerRef?.notify({
             method: 'desktop.event',
@@ -2793,9 +2940,10 @@ async function startDesktopSuite({
 
       emitDesktopDebug('chain.electron.run.dispatched', 'electron main dispatching runInput', {
         session_id: gatewayRuntimeClient.getSessionId(),
-        input_chars: String(payload?.text || '').trim().length
+        input_chars: text.length,
+        input_images: inputImages.length
       });
-      void gatewayRuntimeClient.runInput({ input: payload.text }).catch((err) => {
+      void gatewayRuntimeClient.runInput({ input: text, inputImages }).catch((err) => {
         logger.error?.('[desktop-live2d] gateway runtime input failed', err);
         emitDesktopDebug('chain.electron.run.failed', 'electron main runInput failed', {
           session_id: gatewayRuntimeClient.getSessionId(),
@@ -2895,6 +3043,7 @@ async function startDesktopSuite({
     ipcMain.off(CHANNELS.windowDrag, windowDragListener);
     ipcMain.off(CHANNELS.chatPanelVisibility, chatPanelVisibilityListener);
     ipcMain.off(CHANNELS.chatPanelToggle, chatPanelToggleListener);
+    ipcMain.off(CHANNELS.chatImagePreviewOpen, chatImagePreviewListener);
     ipcMain.off(CHANNELS.modelBoundsUpdate, modelBoundsListener);
     ipcMain.off(CHANNELS.bubbleMetricsUpdate, bubbleMetricsListener);
     ipcMain.off(CHANNELS.actionTelemetry, actionTelemetryListener);
@@ -2920,6 +3069,10 @@ async function startDesktopSuite({
     if (!chatWindow.isDestroyed()) {
       chatWindow.destroy();
     }
+    if (imagePreviewWindow && !imagePreviewWindow.isDestroyed()) {
+      imagePreviewWindow.destroy();
+      imagePreviewWindow = null;
+    }
     if (!avatarWindow.isDestroyed()) {
       avatarWindow.destroy();
     }
@@ -2943,9 +3096,119 @@ async function startDesktopSuite({
   };
 }
 
+function normalizeChatInputImages(rawInputImages) {
+  if (rawInputImages === undefined || rawInputImages === null) {
+    return [];
+  }
+  if (!Array.isArray(rawInputImages)) {
+    return null;
+  }
+  const normalized = [];
+  for (const image of rawInputImages) {
+    if (!image || typeof image !== 'object' || Array.isArray(image)) {
+      continue;
+    }
+    const dataUrl = String(image.data_url || image.dataUrl || '').trim();
+    if (!dataUrl || !/^data:image\//i.test(dataUrl)) {
+      continue;
+    }
+    const mimeType = String(image.mime_type || image.mimeType || '').trim() || 'image/*';
+    normalized.push({
+      client_id: String(image.client_id || image.clientId || '').trim() || `img-${randomUUID().slice(0, 8)}`,
+      name: String(image.name || 'image').trim() || 'image',
+      mime_type: mimeType,
+      size_bytes: Math.max(0, Number(image.size_bytes ?? image.sizeBytes) || 0),
+      data_url: dataUrl
+    });
+    if (normalized.length >= 4) {
+      break;
+    }
+  }
+  return normalized;
+}
+
+function normalizeChatMessageImages(rawImages) {
+  if (!Array.isArray(rawImages)) {
+    return [];
+  }
+
+  const normalized = [];
+  for (const image of rawImages) {
+    if (!image || typeof image !== 'object' || Array.isArray(image)) {
+      continue;
+    }
+    const clientId = String(image.client_id || image.clientId || '').trim();
+    const name = String(image.name || 'image').trim() || 'image';
+    const mimeType = String(image.mime_type || image.mimeType || '').trim() || 'image/*';
+    const sizeBytes = Math.max(0, Number(image.size_bytes ?? image.sizeBytes) || 0);
+    const sourceUrl = String(image.url || '').trim();
+    const previewUrl = String(image.preview_url || image.previewUrl || sourceUrl).trim();
+    const rawDataUrl = String(image.data_url || image.dataUrl || '').trim();
+    const dataUrl = /^data:image\//i.test(rawDataUrl)
+      ? rawDataUrl
+      : (/^data:image\//i.test(previewUrl) ? previewUrl : '');
+    normalized.push({
+      clientId,
+      name,
+      mimeType,
+      sizeBytes,
+      url: sourceUrl,
+      previewUrl: previewUrl || sourceUrl || dataUrl,
+      dataUrl
+    });
+    if (normalized.length >= 8) {
+      break;
+    }
+  }
+  return normalized;
+}
+
+function resolveChatImagePreviewUrl(rawUrl, gatewayUrl) {
+  const source = String(rawUrl || '').trim();
+  if (!source) {
+    return '';
+  }
+  if (/^data:image\//i.test(source) || /^https?:\/\//i.test(source) || /^file:\/\//i.test(source)) {
+    return source;
+  }
+  if (source.startsWith('/')) {
+    try {
+      const resolved = new URL(source, gatewayUrl || '').toString();
+      if (/^https?:\/\//i.test(resolved)) {
+        return resolved;
+      }
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+function normalizeChatImagePreviewPayload(payload, { gatewayUrl } = {}) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const preferredSource = payload.url || payload.previewUrl || payload.preview_url || payload.dataUrl || payload.data_url;
+  const imageUrl = resolveChatImagePreviewUrl(preferredSource, gatewayUrl);
+  if (!imageUrl) {
+    return null;
+  }
+
+  return {
+    imageUrl,
+    name: String(payload.name || 'image').trim() || 'image',
+    mimeType: String(payload.mimeType || payload.mime_type || '').trim() || 'image/*',
+    sizeBytes: Math.max(0, Number(payload.sizeBytes ?? payload.size_bytes) || 0)
+  };
+}
+
 function normalizeChatInputPayload(payload) {
   const text = String(payload?.text || '').trim();
-  if (!text) {
+  const inputImages = normalizeChatInputImages(payload?.input_images ?? payload?.inputImages);
+  if (inputImages === null) {
+    return null;
+  }
+  if (!text && inputImages.length === 0) {
     return null;
   }
 
@@ -2954,6 +3217,7 @@ function normalizeChatInputPayload(payload) {
   return {
     role: allowedRoles.has(role) ? role : 'user',
     text,
+    input_images: inputImages,
     source: String(payload?.source || 'chat-panel'),
     timestamp: Number.isFinite(Number(payload?.timestamp)) ? Number(payload.timestamp) : Date.now()
   };
@@ -2968,6 +3232,7 @@ function createChatInputListener({ logger = console, onChatInput = null } = {}) 
     logger.info?.('[desktop-live2d] chat_input_submit', {
       role: normalized.role,
       textLength: normalized.text.length,
+      inputImages: normalized.input_images.length,
       source: normalized.source
     });
     if (typeof onChatInput === 'function') {
@@ -3426,6 +3691,8 @@ module.exports = {
   resizeWindowKeepingBottomRight,
   writeRuntimeSummary,
   normalizeChatInputPayload,
+  normalizeChatMessageImages,
+  normalizeChatImagePreviewPayload,
   normalizeWindowDragPayload,
   normalizeWindowControlPayload,
   normalizeChatPanelVisibilityPayload,

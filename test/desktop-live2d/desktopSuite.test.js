@@ -18,6 +18,8 @@ const {
   resolveWindowSizeForChatPanel,
   resizeWindowKeepingBottomRight,
   normalizeChatInputPayload,
+  normalizeChatMessageImages,
+  normalizeChatImagePreviewPayload,
   normalizeWindowDragPayload,
   normalizeWindowControlPayload,
   normalizeChatPanelVisibilityPayload,
@@ -299,9 +301,67 @@ test('normalizeChatInputPayload sanitizes and validates payload', () => {
   const fallback = normalizeChatInputPayload({ role: 'bad', text: 'x' });
   assert.equal(fallback.role, 'user');
   assert.equal(typeof fallback.timestamp, 'number');
+  assert.deepEqual(fallback.input_images, []);
+
+  const imageOnly = normalizeChatInputPayload({
+    text: '  ',
+    input_images: [{
+      client_id: 'img-1',
+      name: 'clipboard.png',
+      mime_type: 'image/png',
+      size_bytes: 16,
+      data_url: 'data:image/png;base64,AAAA'
+    }]
+  });
+  assert.equal(imageOnly.text, '');
+  assert.equal(imageOnly.input_images.length, 1);
+  assert.equal(imageOnly.input_images[0].mime_type, 'image/png');
 
   const invalid = normalizeChatInputPayload({ text: '   ' });
   assert.equal(invalid, null);
+  assert.equal(normalizeChatInputPayload({ text: 'ok', input_images: {} }), null);
+});
+
+test('normalizeChatMessageImages keeps preview and data URL fields', () => {
+  const images = normalizeChatMessageImages([
+    {
+      client_id: 'img-a',
+      name: 'capture.png',
+      mime_type: 'image/png',
+      size_bytes: 12,
+      data_url: 'data:image/png;base64,AAAA'
+    },
+    {
+      client_id: 'img-b',
+      name: 'from-server.png',
+      mime_type: 'image/png',
+      size_bytes: 21,
+      url: '/api/session-images/s1/from-server.png'
+    }
+  ]);
+
+  assert.equal(images.length, 2);
+  assert.equal(images[0].dataUrl, 'data:image/png;base64,AAAA');
+  assert.equal(images[0].previewUrl, 'data:image/png;base64,AAAA');
+  assert.equal(images[1].url, '/api/session-images/s1/from-server.png');
+  assert.equal(images[1].previewUrl, '/api/session-images/s1/from-server.png');
+});
+
+test('normalizeChatImagePreviewPayload resolves data and relative urls', () => {
+  const dataUrlPayload = normalizeChatImagePreviewPayload({
+    name: 'clip.png',
+    mime_type: 'image/png',
+    data_url: 'data:image/png;base64,AAAA'
+  }, { gatewayUrl: 'http://127.0.0.1:3000' });
+  assert.equal(dataUrlPayload.imageUrl, 'data:image/png;base64,AAAA');
+
+  const relativePayload = normalizeChatImagePreviewPayload({
+    name: 'remote.png',
+    mimeType: 'image/png',
+    previewUrl: '/api/session-images/s1/remote.png'
+  }, { gatewayUrl: 'http://127.0.0.1:3000' });
+  assert.equal(relativePayload.imageUrl, 'http://127.0.0.1:3000/api/session-images/s1/remote.png');
+  assert.equal(normalizeChatImagePreviewPayload({ previewUrl: 'javascript:alert(1)' }, { gatewayUrl: 'http://127.0.0.1:3000' }), null);
 });
 
 test('normalizeWindowDragPayload validates action and screen coordinates', () => {
@@ -911,12 +971,22 @@ test('createChatInputListener forwards normalized payload to callback', () => {
   });
 
   listener(null, { role: 'tool', text: ' invoke ', source: 'chat-panel' });
+  listener(null, {
+    text: ' ',
+    input_images: [{
+      data_url: 'data:image/png;base64,AAAA',
+      mime_type: 'image/png',
+      size_bytes: 10
+    }]
+  });
   listener(null, { text: '   ' });
 
-  assert.equal(logs.length, 1);
-  assert.equal(received.length, 1);
+  assert.equal(logs.length, 2);
+  assert.equal(received.length, 2);
   assert.equal(received[0].role, 'tool');
   assert.equal(received[0].text, 'invoke');
+  assert.equal(received[1].text, '');
+  assert.equal(received[1].input_images.length, 1);
 });
 
 test('forwardLive2dActionEvent forwards normalized payload into renderer enqueue method', async () => {
