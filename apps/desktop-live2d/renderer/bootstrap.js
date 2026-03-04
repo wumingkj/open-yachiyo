@@ -6,6 +6,7 @@
   const actionQueueApi = window.Live2DActionQueuePlayer || null;
   const actionExecutorApi = window.Live2DActionExecutor || null;
   const lipsyncApi = window.Live2DVisemeLipSync || null;
+  const mouthTransitionApi = window.Live2DMouthTransition || null;
   const state = {
     modelLoaded: false,
     modelName: null,
@@ -38,10 +39,14 @@
   let audioContext = null;
   let lipsyncState = null;
   let lipsyncAnimationFrame = null;
+  let lipsyncReleaseAnimationFrame = null;
   let lipsyncAudioSource = null;
   let lipsyncAnalyser = null;
+  let lipsyncTargetMouthOpen = 0;
+  let lipsyncTargetMouthForm = 0;
   let lipsyncCurrentMouthOpen = 0;
   let lipsyncCurrentMouthForm = 0;
+  let lipsyncSpeakingActive = false;
   let lipsyncDetachModelHook = null;
   let lipsyncDetachTickerHook = null;
   let lipsyncApplyMode = 'raf_direct';
@@ -860,13 +865,46 @@
     }
   }
 
+  function cancelLipsyncReleaseLoop() {
+    if (lipsyncReleaseAnimationFrame) {
+      cancelAnimationFrame(lipsyncReleaseAnimationFrame);
+      lipsyncReleaseAnimationFrame = null;
+    }
+  }
+
+  function resetLipsyncMouthState() {
+    lipsyncTargetMouthOpen = 0;
+    lipsyncTargetMouthForm = 0;
+    lipsyncCurrentMouthOpen = 0;
+    lipsyncCurrentMouthForm = 0;
+    lipsyncSpeakingActive = false;
+  }
+
   function applyLipsyncValuesToModel({ source = 'unknown' } = {}) {
     const coreModel = live2dModel?.internalModel?.coreModel;
     if (!coreModel) {
       return false;
     }
-    const mouthOpen = clamp(Number(lipsyncCurrentMouthOpen) || 0, 0, 1);
-    const mouthForm = clamp(Number(lipsyncCurrentMouthForm) || 0, -1, 1);
+    const transitioned = typeof mouthTransitionApi?.stepMouthTransition === 'function'
+      ? mouthTransitionApi.stepMouthTransition({
+        current: {
+          mouthOpen: lipsyncCurrentMouthOpen,
+          mouthForm: lipsyncCurrentMouthForm
+        },
+        target: {
+          mouthOpen: lipsyncTargetMouthOpen,
+          mouthForm: lipsyncTargetMouthForm
+        },
+        speaking: lipsyncSpeakingActive
+      })
+      : {
+        mouthOpen: lipsyncTargetMouthOpen,
+        mouthForm: lipsyncTargetMouthForm
+      };
+    lipsyncCurrentMouthOpen = clamp(Number(transitioned.mouthOpen) || 0, 0, 1);
+    lipsyncCurrentMouthForm = clamp(Number(transitioned.mouthForm) || 0, -1, 1);
+    const mouthOpen = lipsyncCurrentMouthOpen;
+    const mouthForm = lipsyncCurrentMouthForm;
     try {
       if (typeof coreModel.addParameterValueById === 'function') {
         coreModel.addParameterValueById('ParamMouthOpenY', mouthOpen, 1);
@@ -954,6 +992,70 @@
     return true;
   }
 
+  function finalizeLipsyncStop(reason = 'unspecified') {
+    cancelLipsyncReleaseLoop();
+    detachLipsyncModelHook();
+    detachLipsyncTickerHook();
+    resetLipsyncMouthState();
+    lipsyncApplyMode = 'raf_direct';
+
+    if (live2dModel) {
+      try {
+        live2dModel.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
+        live2dModel.internalModel.coreModel.setParameterValueById('ParamMouthForm', 0);
+        console.log('[lipsync] mouth parameters reset to neutral');
+        emitLipsyncTelemetry('sync.reset_neutral', { has_model: true, mouth_open: 0, mouth_form: 0, reason });
+      } catch (err) {
+        console.warn('[lipsync] Failed to reset mouth parameters:', err);
+        emitLipsyncTelemetry('sync.reset_failed', {
+          has_model: true,
+          reason,
+          error: err?.message || String(err || 'unknown error')
+        });
+      }
+    }
+  }
+
+  function scheduleLipsyncRelease(reason = 'unspecified') {
+    cancelLipsyncReleaseLoop();
+    const transitionSettled = typeof mouthTransitionApi?.isMouthTransitionSettled === 'function'
+      ? () => mouthTransitionApi.isMouthTransitionSettled({
+        current: {
+          mouthOpen: lipsyncCurrentMouthOpen,
+          mouthForm: lipsyncCurrentMouthForm
+        },
+        target: {
+          mouthOpen: lipsyncTargetMouthOpen,
+          mouthForm: lipsyncTargetMouthForm
+        }
+      })
+      : () => (
+        Math.abs(lipsyncCurrentMouthOpen) <= 0.01
+        && Math.abs(lipsyncCurrentMouthForm) <= 0.01
+      );
+
+    const releaseStep = () => {
+      if (!live2dModel) {
+        finalizeLipsyncStop(reason);
+        return;
+      }
+      if (lipsyncApplyMode === 'raf_direct') {
+        applyLipsyncValuesToModel({ source: 'release' });
+      }
+      if (transitionSettled()) {
+        finalizeLipsyncStop(reason);
+        return;
+      }
+      lipsyncReleaseAnimationFrame = requestAnimationFrame(releaseStep);
+    };
+
+    if (transitionSettled()) {
+      finalizeLipsyncStop(reason);
+      return;
+    }
+    lipsyncReleaseAnimationFrame = requestAnimationFrame(releaseStep);
+  }
+
   function stopLipsync(reason = 'unspecified', meta = {}) {
     const stopState = {
       reason: String(reason || 'unspecified'),
@@ -991,25 +1093,11 @@
         reason: stopState.reason
       });
     }
-    detachLipsyncModelHook();
-    detachLipsyncTickerHook();
     lipsyncState = null;
-    lipsyncCurrentMouthOpen = 0;
-    lipsyncCurrentMouthForm = 0;
-    lipsyncApplyMode = 'raf_direct';
-
-    // Reset mouth parameters to neutral
-    if (live2dModel) {
-      try {
-        live2dModel.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
-        live2dModel.internalModel.coreModel.setParameterValueById('ParamMouthForm', 0);
-        console.log('[lipsync] mouth parameters reset to neutral');
-        emitLipsyncTelemetry('sync.reset_neutral', { has_model: true, mouth_open: 0, mouth_form: 0 });
-      } catch (err) {
-        console.warn('[lipsync] Failed to reset mouth parameters:', err);
-        emitLipsyncTelemetry('sync.reset_failed', { has_model: true, error: err?.message || String(err || 'unknown error') });
-      }
-    }
+    lipsyncTargetMouthOpen = 0;
+    lipsyncTargetMouthForm = 0;
+    lipsyncSpeakingActive = false;
+    scheduleLipsyncRelease(stopState.reason);
     emitRendererDebug('lipsync.sync_stopped', {
       request_id: stopState.request_id,
       reason: stopState.reason,
@@ -1039,6 +1127,7 @@
       has_external_analyser: !!externalAnalyser,
       source_label: sourceLabel
     });
+    cancelLipsyncReleaseLoop();
 
     if (!lipsyncApi) {
       console.error('[lipsync] Lipsync API not available - window.Live2DVisemeLipSync is undefined');
@@ -1205,8 +1294,9 @@
         });
         const mouthOpen = enhanced.mouthOpen;
         const mouthForm = enhanced.mouthForm;
-        lipsyncCurrentMouthOpen = mouthOpen;
-        lipsyncCurrentMouthForm = mouthForm;
+        lipsyncTargetMouthOpen = mouthOpen;
+        lipsyncTargetMouthForm = mouthForm;
+        lipsyncSpeakingActive = speaking;
 
         // Log every 30 frames (roughly once per second at 60fps)
         if (frameCount % 30 === 0) {
@@ -2590,6 +2680,7 @@
 
     state.modelLoaded = true;
     state.modelName = modelName || null;
+    resetModelExpressionRaw();
   }
 
   function bindModelInteraction() {
