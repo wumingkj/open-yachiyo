@@ -147,3 +147,32 @@ CI 配置在 GitHub Actions：`.github/workflows/ci.yml`。
 
 - [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer
 - [wkf16](https://github.com/wkf16) — Maintainer
+
+---
+
+## TODO（近期）
+
+> 来源：GitHub Open Issues + `PROGRESS_TODO.md`（快照）
+
+### 待办 Issue
+
+- [ ] #57 Feature: 接入 macOS 加速度计（Accelerometer）
+- [ ] #49 fix(tts): 日语专名读音过滤，修正“八千代”误读
+- [ ] #46 feat(security/ux): Project Dev Mode 与可视化文件编辑权限协商
+- [ ] #35 feat(architecture): 统一 Heartbeat 心跳机制
+- [ ] #31 feat(ai-native): session 级动态权限模型 + admin session
+- [ ] #25 feat(agent): add git repository management capability
+- [ ] #23 [Bug] WebUI 修改保存称呼后 LLM 无法修正称呼
+
+### 近期进展（来自 TODO 文档）
+
+- [x] Desktop Live2D Phase A 重规划基线
+- [x] Phase B 聊天面板 UI
+- [x] Phase C RPC 消息转发
+- [x] Phase D 模型控制 tool-calling 暴露
+- [x] Phase F 会话同步 + 聊天面板交互优化
+- [ ] Phase E 稳定化与发布加固（REVIEW）
+- [ ] 异步语音模块 as tool-calling（ASR + TTS）
+- [ ] Live2D 动作/控制接口 tool 化
+- [ ] Telegram / NapCat 适配器
+- [ ] WebUI 固定高权限控制会话

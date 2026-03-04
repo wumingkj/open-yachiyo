@@ -147,3 +147,32 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`).
 
 - [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer
 - [wkf16](https://github.com/wkf16) — Maintainer
+
+---
+
+## TODO (Near-term)
+
+> Source: GitHub open issues + `PROGRESS_TODO.md` snapshot.
+
+### Open Issues
+
+- [ ] #57 Feature: Integrate macOS Accelerometer
+- [ ] #49 fix(tts): Japanese proper noun pronunciation for "八千代"
+- [ ] #46 feat(security/ux): Project Dev Mode + visual file-edit permission negotiation
+- [ ] #35 feat(architecture): unified Heartbeat mechanism
+- [ ] #31 feat(ai-native): session-level dynamic permission model + admin session
+- [ ] #25 feat(agent): add git repository management capability
+- [ ] #23 [Bug] WebUI nickname update not reflected by LLM
+
+### Recent Progress (from TODO doc)
+
+- [x] Desktop Live2D Phase A replan baseline
+- [x] Phase B chat panel UI
+- [x] Phase C RPC forwarding
+- [x] Phase D model-control tool-calling exposure
+- [x] Phase F session sync + chat panel interaction polish
+- [ ] Phase E stabilization and release hardening (REVIEW)
+- [ ] Async voice module as tool-calling capability (ASR + TTS)
+- [ ] Expose Live2D motion/control as model-callable tools
+- [ ] Telegram / NapCat adapters
+- [ ] WebUI privileged fixed-session control dialog
