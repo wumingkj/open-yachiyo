@@ -36,7 +36,7 @@
     silence: {
       energyThreshold: 0.028,
       confidenceThreshold: 0.08,
-      holdFrames: 3,
+      holdFrames: 0,
       holdDecay: 0.66,
       energyDrivenOpenFloor: 0.012,
       energyDrivenOpenScale: 1.7
