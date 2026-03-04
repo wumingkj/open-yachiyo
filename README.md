@@ -62,6 +62,7 @@ npm run desktop:smoke
 - **JSON-RPC + queue ingress** (`runtime.run`) decoupled from execution
 - **EventBus tool dispatch** (`tool.call.requested` -> `tool.call.result`)
 - **Streaming message pipeline** (`runtime.start/event/final` pushed to Web/Electron in real time)
+- **Realtime auto lipsync for streaming output** (audio-spectrum viseme inference + consonant transient overlays, driving `ParamMouthOpenY` / `ParamMouthForm` automatically)
 - **Session persistence** (messages/events/runs)
 - **Long-term memory tools** (`memory_write`, `memory_search`)
 - **Desktop rich rendering** (Markdown/LaTeX/Mermaid, streaming bubbles)

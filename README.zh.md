@@ -62,6 +62,7 @@ npm run desktop:smoke
 - **JSON-RPC + 队列入口**（`runtime.run` 与执行解耦）
 - **EventBus 工具分发**（`tool.call.requested` -> `tool.call.result`）
 - **流式消息链路**（`runtime.start/event/final` 实时推送到 Web/Electron）
+- **面向流式输出的实时全自动口型模拟**（频谱 viseme 推断 + 辅音瞬态叠加，自动驱动 `ParamMouthOpenY` / `ParamMouthForm`）
 - **会话持久化**（消息/事件/运行记录）
 - **长期记忆工具化**（`memory_write`、`memory_search`）
 - **桌面富文本渲染**（Markdown/LaTeX/Mermaid + 流式气泡）
