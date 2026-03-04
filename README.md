@@ -3,10 +3,6 @@
 ![open-yachiyo cover](assets/readme-cover.jpg)
 
 Native-first desktop AI assistant runtime with a **controllable ReAct loop**.
-Built for two goals:
-
-1. **Story A: Multi-agent software delivery** (parallel, auditable, review-gated)
-2. **Story B: Controllable runtime core** (bounded, debuggable, deterministic)
 
 🇨🇳 [中文说明](./README.zh.md)
 
@@ -116,25 +112,13 @@ Reference:
 
 ---
 
-## Story A: Multi-agent development at high throughput
+## Engineering Workflow
 
-This project’s development workflow is designed for sustained parallel delivery (e.g., **~15k added lines/day over 5 days** in burst phases):
+Parallel development and integration are handled with branch/worktree discipline and documented merge strategy.
 
-1. **Split by branch/worktree** for concurrent agent work
-2. **Route runtime chain to SSE** so debug agents can inspect exact RPC/tool paths
-3. **Review-gated integration** before merging to `main`
-4. **Keep `main` stable**, merge small validated units
-
-### Practical mechanics
-
-- Branch rules and worktree SOP:
-  - `docs/BRANCH_COLLABORATION_SPEC.md`
-  - `docs/MERGE_STRATEGY.md`
-- SSE debug instrumentation for agent diagnosis:
-  - `docs/SSE_EXPRESS_LOGGER_MVP_PLAN.md`
-  - `docs/AGENT_SSE_DEBUG_TOOLCHAIN_GUIDE.md`
-
-This makes multi-agent coding less “black box”, and more like an observable software pipeline.
+- Branch/worktree collaboration: `docs/BRANCH_COLLABORATION_SPEC.md`
+- Merge strategy: `docs/MERGE_STRATEGY.md`
+- SSE logger MVP plan: `docs/SSE_EXPRESS_LOGGER_MVP_PLAN.md`
 
 ---
 

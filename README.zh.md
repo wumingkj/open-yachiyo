@@ -3,10 +3,6 @@
 ![open-yachiyo cover](assets/readme-cover.jpg)
 
 原生优先的桌面 AI 助手运行时，核心是**可控 ReAct 循环**。
-项目聚焦两个故事：
-
-1. **Story A：多 Agent 并行软件交付**（并行、可审计、评审门禁）
-2. **Story B：可控 Runtime 内核**（有界、可调试、可预测）
 
 🇺🇸 [English](./README.md)
 
@@ -116,25 +112,13 @@ OpenClaw 强在多渠道网关与编排能力。
 
 ---
 
-## Story A：多 Agent 并行开发（含高吞吐实践）
+## 工程协作方式
 
-本项目的开发流程就是为并行交付设计的（冲刺阶段可达到 **连续 5 天日均约 1.5w 新增行** 的量级）：
+并行开发与集成采用分支/worktree 协作与文档化合并策略。
 
-1. **分支 + worktree 并行开发**
-2. **SSE 暴露 RPC/工具链路**，让调试 Agent 可见可追
-3. **评审门禁后集成**，再合并 `main`
-4. **主线稳定优先**，小步快跑合并
-
-### 落地机制
-
-- 分支协作与 worktree 规范：
-  - `docs/BRANCH_COLLABORATION_SPEC.md`
-  - `docs/MERGE_STRATEGY.md`
-- 面向 Agent 的 SSE 调试链路：
-  - `docs/SSE_EXPRESS_LOGGER_MVP_PLAN.md`
-  - `docs/AGENT_SSE_DEBUG_TOOLCHAIN_GUIDE.md`
-
-这套机制让多 Agent 开发从“黑盒自动化”变成“可观测软件流水线”。
+- 分支/worktree 协作规范：`docs/BRANCH_COLLABORATION_SPEC.md`
+- 合并策略：`docs/MERGE_STRATEGY.md`
+- SSE 调试链路方案：`docs/SSE_EXPRESS_LOGGER_MVP_PLAN.md`
 
 ---
 
