@@ -15,7 +15,7 @@ const {
 
 test('sessionPermissions exposes expected constants and level validators', () => {
   assert.deepEqual(SESSION_PERMISSION_LEVELS, ['low', 'medium', 'high']);
-  assert.equal(DEFAULT_SESSION_PERMISSION_LEVEL, 'medium');
+  assert.equal(DEFAULT_SESSION_PERMISSION_LEVEL, 'high');
   assert.equal(DEFAULT_SESSION_WORKSPACE_MODE, 'session');
   assert.equal(isSessionPermissionLevel('low'), true);
   assert.equal(isSessionPermissionLevel('medium'), true);
@@ -25,7 +25,7 @@ test('sessionPermissions exposes expected constants and level validators', () =>
 
 test('normalizeSessionPermissionLevel falls back to configured default', () => {
   assert.equal(normalizeSessionPermissionLevel('high'), 'high');
-  assert.equal(normalizeSessionPermissionLevel('invalid'), 'medium');
+  assert.equal(normalizeSessionPermissionLevel('invalid'), 'high');
   assert.equal(normalizeSessionPermissionLevel(undefined, { fallback: 'low' }), 'low');
 });
 
@@ -41,7 +41,7 @@ test('workspace and session settings normalization keeps stable shape', () => {
   });
 
   assert.deepEqual(buildDefaultSessionSettings(), {
-    permission_level: 'medium',
+    permission_level: 'high',
     workspace: {
       mode: 'session',
       root_dir: null
@@ -62,7 +62,7 @@ test('workspace and session settings normalization keeps stable shape', () => {
 test('mergeSessionSettings patches only supported keys and preserves normalized values', () => {
   const merged = mergeSessionSettings(
     {
-      permission_level: 'medium',
+      permission_level: 'high',
       workspace: {
         mode: 'session',
         root_dir: '/tmp/workspace-a'

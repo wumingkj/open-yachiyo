@@ -52,6 +52,34 @@ function mapGatewayMessageToDesktopEvent(message) {
   return null;
 }
 
+function normalizeInputImages(inputImages) {
+  if (!Array.isArray(inputImages)) {
+    return [];
+  }
+  const normalized = [];
+  for (const image of inputImages) {
+    if (!image || typeof image !== 'object' || Array.isArray(image)) {
+      continue;
+    }
+    const dataUrl = String(image.data_url || image.dataUrl || '').trim();
+    if (!dataUrl || !/^data:image\//i.test(dataUrl)) {
+      continue;
+    }
+    const mimeType = String(image.mime_type || image.mimeType || '').trim() || 'image/*';
+    normalized.push({
+      client_id: String(image.client_id || image.clientId || '').trim() || `img-${randomUUID().slice(0, 8)}`,
+      name: String(image.name || 'image').trim() || 'image',
+      mime_type: mimeType,
+      size_bytes: Math.max(0, Number(image.size_bytes ?? image.sizeBytes) || 0),
+      data_url: dataUrl
+    });
+    if (normalized.length >= 4) {
+      break;
+    }
+  }
+  return normalized;
+}
+
 class GatewayRuntimeClient {
   constructor({
     gatewayUrl,
@@ -107,14 +135,14 @@ class GatewayRuntimeClient {
     return this.sessionId;
   }
 
-  async createAndUseNewSession({ permissionLevel = 'medium' } = {}) {
+  async createAndUseNewSession({ permissionLevel = 'high' } = {}) {
     const sessionId = createDesktopSessionId();
     this.setSessionId(sessionId);
     await this.ensureSession({ sessionId, permissionLevel });
     return sessionId;
   }
 
-  async ensureSession({ sessionId = this.sessionId, permissionLevel = 'medium' } = {}) {
+  async ensureSession({ sessionId = this.sessionId, permissionLevel = 'high' } = {}) {
     if (typeof this.fetchImpl !== 'function') {
       throw new Error('fetch is unavailable for gateway session bootstrap');
     }
@@ -158,10 +186,11 @@ class GatewayRuntimeClient {
     }
   }
 
-  async runInput({ input, permissionLevel } = {}) {
+  async runInput({ input, permissionLevel, inputImages } = {}) {
     const content = String(input || '').trim();
-    if (!content) {
-      throw new Error('gateway runtime input must be non-empty');
+    const normalizedInputImages = normalizeInputImages(inputImages);
+    if (!content && normalizedInputImages.length === 0) {
+      throw new Error('gateway runtime input or inputImages must be non-empty');
     }
 
     const requestId = `desktop-${randomUUID()}`;
@@ -170,10 +199,15 @@ class GatewayRuntimeClient {
       id: requestId,
       method: 'runtime.run',
       params: {
-        session_id: this.sessionId,
-        input: content
+        session_id: this.sessionId
       }
     };
+    if (content) {
+      payload.params.input = content;
+    }
+    if (normalizedInputImages.length > 0) {
+      payload.params.input_images = normalizedInputImages;
+    }
     if (permissionLevel) {
       payload.params.permission_level = permissionLevel;
     }
@@ -181,6 +215,7 @@ class GatewayRuntimeClient {
       session_id: this.sessionId,
       request_id: requestId,
       input_chars: content.length,
+      input_images: normalizedInputImages.length,
       permission_level: permissionLevel || null
     });
 

@@ -1,5 +1,5 @@
 const SESSION_PERMISSION_LEVELS = Object.freeze(['low', 'medium', 'high']);
-const DEFAULT_SESSION_PERMISSION_LEVEL = 'medium';
+const DEFAULT_SESSION_PERMISSION_LEVEL = 'high';
 const DEFAULT_SESSION_WORKSPACE_MODE = 'session';
 const DEFAULT_VOICE_AUTO_REPLY_ENABLED = false;
 

@@ -113,6 +113,52 @@ test('GatewayRuntimeClient forwards runtime notifications and resolves rpc resul
   }
 });
 
+test('GatewayRuntimeClient runInput supports image-only runtime requests', async () => {
+  const port = await getFreePort();
+  const wss = new WebSocketServer({ host: '127.0.0.1', port, path: '/ws' });
+  let capturedRequest = null;
+
+  wss.on('connection', (socket) => {
+    socket.on('message', (raw) => {
+      capturedRequest = JSON.parse(String(raw));
+      socket.send(JSON.stringify({
+        jsonrpc: '2.0',
+        id: capturedRequest.id,
+        result: { ok: true }
+      }));
+    });
+  });
+
+  try {
+    const client = new GatewayRuntimeClient({
+      gatewayUrl: `http://127.0.0.1:${port}`,
+      sessionId: 'desktop-live2d-chat'
+    });
+
+    const result = await client.runInput({
+      input: '   ',
+      inputImages: [{
+        client_id: 'img-1',
+        name: 'test.png',
+        mime_type: 'image/png',
+        size_bytes: 8,
+        data_url: 'data:image/png;base64,AAAA'
+      }]
+    });
+
+    assert.equal(result.ok, true);
+    assert.ok(capturedRequest);
+    assert.equal(capturedRequest.method, 'runtime.run');
+    assert.equal(capturedRequest.params.session_id, 'desktop-live2d-chat');
+    assert.equal(capturedRequest.params.input, undefined);
+    assert.equal(Array.isArray(capturedRequest.params.input_images), true);
+    assert.equal(capturedRequest.params.input_images.length, 1);
+    assert.equal(capturedRequest.params.input_images[0].mime_type, 'image/png');
+  } finally {
+    await new Promise((resolve, reject) => wss.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
 test('GatewayRuntimeClient rejects when gateway returns rpc error', async () => {
   const port = await getFreePort();
   const wss = new WebSocketServer({ host: '127.0.0.1', port, path: '/ws' });
