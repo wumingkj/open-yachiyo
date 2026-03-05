@@ -166,7 +166,7 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`).
 ### Open Issues
 
 - [ ] #57 Feature: Integrate macOS Accelerometer
-- [ ] #49 fix(tts): Japanese proper noun pronunciation for "八千代"
+- [x] #49 fix(tts): Japanese proper noun pronunciation for "八千代"
 - [ ] #46 feat(security/ux): Project Dev Mode + visual file-edit permission negotiation
 - [ ] #35 feat(architecture): unified Heartbeat mechanism
 - [ ] #31 feat(ai-native): session-level dynamic permission model + admin session

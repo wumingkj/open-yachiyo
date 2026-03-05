@@ -168,7 +168,7 @@ CI 配置在 GitHub Actions：`.github/workflows/ci.yml`。
 ### 待办 Issue
 
 - [ ] #57 Feature: 接入 macOS 加速度计（Accelerometer）
-- [ ] #49 fix(tts): 日语专名读音过滤，修正“八千代”误读
+- [x] #49 fix(tts): 日语专名读音过滤，修正“八千代”误读
 - [ ] #46 feat(security/ux): Project Dev Mode 与可视化文件编辑权限协商
 - [ ] #35 feat(architecture): 统一 Heartbeat 心跳机制
 - [ ] #31 feat(ai-native): session 级动态权限模型 + admin session
