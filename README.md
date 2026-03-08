@@ -8,7 +8,7 @@ AI Native runtime for an **Agentic desktop pet**, with a **controllable ReAct lo
 
 ### Voice Control
 - `/voice on` - Enable forced voice output
-- `/voice off` - Disable voice output, text-only replies
+- `/voice off` - Let yachiyo autonomously decide whether to use voice
 
 ---
 
