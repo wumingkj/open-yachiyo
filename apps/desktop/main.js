@@ -42,7 +42,7 @@ function stopGatewayProcess() {
   }, 2000);
 }
 
-function createMainWindow() {
+function createMainWindow(entryUrl = GATEWAY_URL) {
   const win = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -57,7 +57,21 @@ function createMainWindow() {
   });
 
   win.once('ready-to-show', () => win.show());
-  win.loadURL(GATEWAY_URL);
+  win.loadURL(entryUrl);
+}
+
+async function resolveInitialEntryUrl() {
+  try {
+    const response = await fetch(`${GATEWAY_URL}/api/onboarding/state`);
+    if (!response.ok) return GATEWAY_URL;
+    const payload = await response.json();
+    if (payload?.ok && payload?.data?.done === false) {
+      return `${GATEWAY_URL}/onboarding.html`;
+    }
+  } catch {
+    // fallback to default chat page
+  }
+  return GATEWAY_URL;
 }
 
 app.on('before-quit', () => {
@@ -72,9 +86,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow();
-  }
+  if (BrowserWindow.getAllWindows().length !== 0) return;
+  resolveInitialEntryUrl()
+    .then((entryUrl) => createMainWindow(entryUrl))
+    .catch(() => createMainWindow());
 });
 
 app.whenReady().then(async () => {
@@ -83,7 +98,8 @@ app.whenReady().then(async () => {
   }
 
   await waitForGateway(GATEWAY_URL, { timeoutMs: 30000 });
-  createMainWindow();
+  const entryUrl = await resolveInitialEntryUrl();
+  createMainWindow(entryUrl);
 }).catch((err) => {
   console.error('Desktop bootstrap failed:', err);
   app.quit();

@@ -1,0 +1,122 @@
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", sans-serif;
+  background: linear-gradient(180deg, #f6f7fb, #edf2fb);
+  color: #1b2533;
+}
+
+.onboarding-shell {
+  max-width: 920px;
+  margin: 20px auto;
+  padding: 16px;
+}
+
+.onboarding-header {
+  margin-bottom: 14px;
+}
+
+.onboarding-header h1 {
+  margin: 0 0 8px;
+}
+
+.onboarding-steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-mark {
+  border: 1px solid #c6cfde;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #566a86;
+}
+
+.step-mark.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.panel {
+  border: 1px solid #d7deea;
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+input,
+select {
+  border: 1px solid #c4cedf;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.mode-switch {
+  border: 1px dashed #bcc9df;
+  border-radius: 10px;
+  margin: 12px 0;
+  padding: 10px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border: 1px solid #c3cde0;
+  background: #f8fbff;
+  color: #22324b;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.btn-success {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.status-bar {
+  border-top: 1px solid #d3dce9;
+  padding-top: 8px;
+  color: #42566f;
+  font-size: 13px;
+}
+
+.hidden {
+  display: none;
+}
