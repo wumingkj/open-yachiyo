@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -9,10 +9,12 @@
 </head>
 <body>
   <main class="onboarding-shell">
-    <header class="onboarding-header">
-      <h1>初次配置向导</h1>
-      <p>完成 LLM、语音与偏好配置后即可开始使用。</p>
-      <div class="onboarding-steps">
+    <header class="onboarding-header panel">
+      <div class="onboarding-headline">
+        <h1>初次配置向导</h1>
+        <p>完成 LLM、语音与偏好配置后即可开始使用。</p>
+      </div>
+      <div class="onboarding-steps" role="tablist" aria-label="onboarding steps">
         <span id="stepMark1" class="step-mark active">1. LLM</span>
         <span id="stepMark2" class="step-mark">2. 语音克隆</span>
         <span id="stepMark3" class="step-mark">3. 偏好</span>
@@ -42,8 +44,8 @@
       </div>
       <fieldset class="mode-switch">
         <legend>TTS 模式</legend>
-        <label><input type="radio" name="ttsMode" value="normal" checked /> 普通 tts-vc</label>
-        <label><input type="radio" name="ttsMode" value="realtime" /> 实时 tts-vc-realtime</label>
+        <label class="radio-row"><input type="radio" name="ttsMode" value="normal" checked /> 普通 tts-vc</label>
+        <label class="radio-row"><input type="radio" name="ttsMode" value="realtime" /> 实时 tts-vc-realtime</label>
       </fieldset>
       <div class="grid">
         <label>Preferred Name <input id="voicePreferredName" value="yachiyo-main-voice" /></label>
@@ -89,7 +91,7 @@
       </div>
     </section>
 
-    <footer class="status-bar">
+    <footer class="status-bar panel">
       <span id="statusText">准备就绪</span>
     </footer>
   </main>

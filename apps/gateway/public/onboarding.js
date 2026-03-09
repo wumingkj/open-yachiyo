@@ -1,3 +1,5 @@
+﻿const THEME_KEY = 'yachiyo_theme_v1';
+
 const el = {
   step1: document.getElementById('step1'),
   step2: document.getElementById('step2'),
@@ -34,6 +36,23 @@ const el = {
   completeBtn: document.getElementById('completeBtn')
 };
 
+function applyTheme(pref) {
+  const resolved = pref === 'auto'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : pref;
+  document.documentElement.setAttribute('data-theme', resolved);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  const preferred = saved || 'auto';
+  applyTheme(preferred);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    const current = localStorage.getItem(THEME_KEY) || 'auto';
+    if (current === 'auto') applyTheme('auto');
+  });
+}
+
 function getTtsMode() {
   const checked = document.querySelector('input[name="ttsMode"]:checked');
   return checked ? checked.value : 'normal';
@@ -41,7 +60,7 @@ function getTtsMode() {
 
 function setStatus(text, isError = false) {
   el.statusText.textContent = text;
-  el.statusText.style.color = isError ? '#b42318' : '#42566f';
+  el.statusText.style.color = isError ? '#ff7a9f' : 'var(--muted)';
 }
 
 function switchStep(step) {
@@ -72,13 +91,13 @@ async function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Failed to read audio file'));
+    reader.onerror = () => reject(new Error('读取音频文件失败'));
     reader.readAsDataURL(file);
   });
 }
 
 async function saveProvider() {
-  setStatus('Saving LLM provider...');
+  setStatus('正在保存 LLM provider...');
   try {
     await fetchJson('/api/onboarding/provider/save', {
       method: 'POST',
@@ -95,7 +114,7 @@ async function saveProvider() {
         active_provider: el.llmKey.value.trim()
       })
     });
-    setStatus('LLM provider saved');
+    setStatus('LLM provider 已保存');
     switchStep(2);
   } catch (err) {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
@@ -105,10 +124,10 @@ async function saveProvider() {
 async function saveManualVoiceId() {
   const voiceId = el.voiceManualId.value.trim();
   if (!voiceId) {
-    setStatus('Voice ID is required', true);
+    setStatus('请填写 Voice ID', true);
     return;
   }
-  setStatus('Saving manual voice id...');
+  setStatus('正在保存手动 Voice ID...');
   try {
     await fetchJson('/api/onboarding/voice/save-manual', {
       method: 'POST',
@@ -120,7 +139,7 @@ async function saveManualVoiceId() {
         voice_id: voiceId
       })
     });
-    setStatus('Voice ID saved');
+    setStatus('Voice ID 已保存');
     switchStep(3);
   } catch (err) {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
@@ -130,10 +149,10 @@ async function saveManualVoiceId() {
 async function cloneVoice() {
   const file = el.voiceAudioFile.files?.[0];
   if (!file) {
-    setStatus('Please choose an audio file first', true);
+    setStatus('请先选择音频文件', true);
     return;
   }
-  setStatus('Cloning voice...');
+  setStatus('正在克隆声线...');
   try {
     const audioDataUrl = await fileToDataUrl(file);
     await fetchJson('/api/onboarding/voice/clone', {
@@ -147,7 +166,7 @@ async function cloneVoice() {
         audio_data_url: audioDataUrl
       })
     });
-    setStatus('Voice clone saved');
+    setStatus('声线克隆成功，已写入配置');
     switchStep(3);
   } catch (err) {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
@@ -155,7 +174,7 @@ async function cloneVoice() {
 }
 
 async function savePreferences() {
-  setStatus('Saving preferences...');
+  setStatus('正在保存偏好...');
   try {
     await fetchJson('/api/onboarding/preferences/save', {
       method: 'POST',
@@ -177,17 +196,17 @@ async function savePreferences() {
         }
       })
     });
-    setStatus('Preferences saved');
+    setStatus('偏好已保存');
   } catch (err) {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
   }
 }
 
 async function completeOnboarding() {
-  setStatus('Completing onboarding...');
+  setStatus('正在完成 onboarding...');
   try {
     await fetchJson('/api/onboarding/complete', { method: 'POST' });
-    setStatus('Onboarding completed, redirecting...');
+    setStatus('配置完成，正在进入主界面...');
     setTimeout(() => {
       window.location.href = '/';
     }, 500);
@@ -197,6 +216,8 @@ async function completeOnboarding() {
 }
 
 async function init() {
+  initTheme();
+
   try {
     const stateResp = await fetchJson('/api/onboarding/state');
     if (stateResp?.data?.done) {
