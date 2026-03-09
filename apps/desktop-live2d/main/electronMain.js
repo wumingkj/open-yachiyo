@@ -34,21 +34,21 @@ function toOnboardingUrl(gatewayUrl) {
   return new URL('/onboarding.html', gatewayUrl).toString();
 }
 
-async function fetchGatewayHealth(gatewayUrl) {
-  const url = new URL('/health', gatewayUrl).toString();
+async function fetchOnboardingState(gatewayUrl) {
+  const url = new URL('/api/onboarding/state', gatewayUrl).toString();
   const response = await withTimeout(fetch(url), HTTP_TIMEOUT_MS);
   if (!response.ok) {
-    throw new Error(`gateway health request failed: ${response.status}`);
+    throw new Error(`onboarding state request failed: ${response.status}`);
   }
   return response.json();
 }
 
-async function isLlmConfigured(gatewayUrl) {
+async function isOnboardingCompleted(gatewayUrl) {
   try {
-    const payload = await fetchGatewayHealth(gatewayUrl);
-    return Boolean(payload?.llm?.has_api_key);
+    const payload = await fetchOnboardingState(gatewayUrl);
+    return Boolean(payload?.ok && payload?.data?.done === true);
   } catch (err) {
-    console.warn('[desktop-live2d] health check failed, fallback to onboarding', err?.message || err);
+    console.warn('[desktop-live2d] onboarding state check failed, fallback to onboarding', err?.message || err);
     return false;
   }
 }
@@ -119,8 +119,8 @@ function enterOnboardingMode(gatewayUrl) {
 
     onboardingCheckInFlight = true;
     try {
-      const configured = await isLlmConfigured(gatewayUrl);
-      if (configured) {
+      const completed = await isOnboardingCompleted(gatewayUrl);
+      if (completed) {
         onboardingRequired = false;
         clearOnboardingPoller();
         closeOnboardingWindow();
@@ -186,8 +186,8 @@ async function bootstrap() {
       gatewayUrl: suite.summary.gatewayUrl
     });
 
-    const configured = await isLlmConfigured(suite.summary.gatewayUrl);
-    if (!configured) {
+    const completed = await isOnboardingCompleted(suite.summary.gatewayUrl);
+    if (!completed) {
       enterOnboardingMode(suite.summary.gatewayUrl);
     }
 
