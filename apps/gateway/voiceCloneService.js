@@ -220,6 +220,19 @@ function dataUrlForDashscope(binary, mimeType) {
   return `data:${mimeType};base64,${base64}`;
 }
 
+function normalizePreferredName(rawValue = '', { targetMode = 'normal' } = {}) {
+  const raw = String(rawValue || '').trim();
+  const normalized = raw
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+
+  if (normalized) return normalized;
+  const ts = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  return `yachiyo_${targetMode}_${ts}`;
+}
+
 async function cloneVoice({
   apiKey,
   audioDataUrl,
@@ -264,8 +277,11 @@ async function cloneVoice({
     const finalBinary = await fs.readFile(sourceForUploadPath);
     const finalMimeType = sourceForUploadPath === tempNormalizedPath ? 'audio/mpeg' : (mimeType || 'audio/mpeg');
     const audioDataForUpload = dataUrlForDashscope(finalBinary, finalMimeType);
-    const sanitizedPreferredName = String(preferredName || '').trim()
-      || `yachiyo-${targetMode}-${createHash('md5').update(finalBinary).digest('hex').slice(0, 8)}`;
+    const fallbackHint = createHash('md5').update(finalBinary).digest('hex').slice(0, 8);
+    const sanitizedPreferredName = normalizePreferredName(
+      String(preferredName || '').trim() || `yachiyo_${targetMode}_${fallbackHint}`,
+      { targetMode }
+    );
 
     const createPayload = {
       model: DEFAULT_VOICE_CLONE_MODEL,
