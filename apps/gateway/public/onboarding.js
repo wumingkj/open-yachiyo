@@ -39,12 +39,14 @@ const el = {
   prefDesktopVoiceTransport: document.getElementById('prefDesktopVoiceTransport'),
   savePrefsBtn: document.getElementById('savePrefsBtn'),
   backToStep2Btn: document.getElementById('backToStep2Btn'),
-  completeBtn: document.getElementById('completeBtn')
+  completeBtn: document.getElementById('completeBtn'),
+  skipBtn: document.getElementById('skipBtn')
 };
 
 const state = {
   referenceAudioUserPath: '',
-  referenceAudioUserDir: ''
+  referenceAudioUserDir: '',
+  forceOpen: new URLSearchParams(window.location.search).get('force') === '1'
 };
 
 function applyTheme(pref) {
@@ -229,6 +231,19 @@ async function completeOnboarding() {
   }
 }
 
+async function skipOnboarding() {
+  setStatus('正在跳过配置...');
+  try {
+    await fetchJson('/api/onboarding/skip', { method: 'POST' });
+    setStatus('已跳过 onboarding，稍后可重新打开。');
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 500);
+  } catch (err) {
+    setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
+  }
+}
+
 async function initReferenceAudioInfo() {
   try {
     const response = await fetchJson('/api/onboarding/reference-audio');
@@ -290,9 +305,14 @@ async function init() {
 
   try {
     const stateResp = await fetchJson('/api/onboarding/state');
-    if (stateResp?.data?.done) {
+    if (stateResp?.data?.done && !state.forceOpen) {
       window.location.href = '/';
       return;
+    }
+    if (stateResp?.data?.done && state.forceOpen) {
+      setStatus(stateResp?.data?.skipped
+        ? '当前 onboarding 已跳过，可在此重新补充配置。'
+        : '当前 onboarding 已完成，可在此重新修改配置。');
     }
     const lastStep = String(stateResp?.data?.last_step || 'provider');
     if (lastStep === 'voice') switchStep(2);
@@ -310,6 +330,7 @@ async function init() {
   el.backToStep2Btn.addEventListener('click', () => switchStep(2));
   el.savePrefsBtn.addEventListener('click', savePreferences);
   el.completeBtn.addEventListener('click', completeOnboarding);
+  el.skipBtn.addEventListener('click', skipOnboarding);
 }
 
 void init();

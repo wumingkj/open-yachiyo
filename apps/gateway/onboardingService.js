@@ -46,6 +46,7 @@ async function readOnboardingState() {
   if (!fs.existsSync(statePath)) {
     return {
       done: false,
+      skipped: false,
       version: ONBOARDING_STATE_VERSION,
       completed_at: null,
       last_step: 'provider'
@@ -56,6 +57,7 @@ async function readOnboardingState() {
     const parsed = JSON.parse(raw || '{}');
     return {
       done: Boolean(parsed.done),
+      skipped: Boolean(parsed.skipped),
       version: Number(parsed.version) || ONBOARDING_STATE_VERSION,
       completed_at: parsed.completed_at || null,
       last_step: String(parsed.last_step || 'provider')
@@ -63,6 +65,7 @@ async function readOnboardingState() {
   } catch {
     return {
       done: false,
+      skipped: false,
       version: ONBOARDING_STATE_VERSION,
       completed_at: null,
       last_step: 'provider'
@@ -83,18 +86,21 @@ async function markOnboardingStep(step) {
     ...prev,
     version: ONBOARDING_STATE_VERSION,
     done: false,
+    skipped: false,
     completed_at: null,
     last_step: String(step || prev.last_step || 'provider')
   };
   return writeOnboardingState(next);
 }
 
-async function markOnboardingCompleted() {
+async function markOnboardingCompleted(options = {}) {
+  const skipped = parseBoolean(options.skipped, false);
   const prev = await readOnboardingState();
   const next = {
     ...prev,
     version: ONBOARDING_STATE_VERSION,
     done: true,
+    skipped,
     completed_at: new Date().toISOString(),
     last_step: 'complete'
   };

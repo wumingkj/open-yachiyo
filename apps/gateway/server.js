@@ -589,6 +589,11 @@ app.post('/api/onboarding/complete', async (_, res) => {
   res.json({ ok: true, data: state });
 });
 
+app.post('/api/onboarding/skip', async (_, res) => {
+  const state = await markOnboardingCompleted({ skipped: true });
+  res.json({ ok: true, data: state });
+});
+
 app.get('/api/sessions/:sessionId', async (req, res) => {
   const session = await sessionStore.getSession(req.params.sessionId);
   if (!session) {

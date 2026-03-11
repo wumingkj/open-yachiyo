@@ -11,6 +11,7 @@
 - `POST /api/onboarding/voice/save-manual`
 - `POST /api/onboarding/preferences/save`
 - `POST /api/onboarding/complete`
+- `POST /api/onboarding/skip`
 
 ## 2. 数据写入规则
 
@@ -74,6 +75,11 @@
 
 - `~/yachiyo/data/onboarding-state.json`
 - 字段：`done/version/completed_at/last_step`
+
+`POST /api/onboarding/skip` 写入：
+
+- `~/yachiyo/data/onboarding-state.json`
+- 字段：`done/skipped/version/completed_at/last_step`
 
 ## 3. 错误码
 
