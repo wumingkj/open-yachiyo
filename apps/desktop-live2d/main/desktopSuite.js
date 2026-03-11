@@ -1303,7 +1303,7 @@ async function processVoiceRequestedOnDesktop({
   const voice = String(eventPayload?.voiceId || '');
   const sessionId = String(eventPayload?.session_id || '').trim() || null;
   const traceId = String(eventPayload?.trace_id || '').trim() || null;
-  const voiceTransport = String(voiceConfig?.transport || 'non_streaming').trim().toLowerCase();
+  const voiceTransport = String(voiceConfig?.transport || 'realtime').trim().toLowerCase();
   const voiceOutputDelayMs = Math.max(0, Math.min(500, Math.round(Number(voiceConfig?.outputDelayMs) || 0)));
   const fallbackOnRealtimeError = voiceConfig?.fallbackOnRealtimeError !== false;
   const realtimePrebufferMs = Math.max(40, Number(voiceConfig?.realtime?.prebufferMs) || 160);
@@ -1621,6 +1621,7 @@ async function startDesktopSuite({
   ipcMain,
   screen,
   shell = null,
+  projectRoot = null,
   onResizeModeChange = null,
   logger = console,
   onChatInput = null
@@ -1629,7 +1630,9 @@ async function startDesktopSuite({
     throw new Error('startDesktopSuite requires app, BrowserWindow, and ipcMain');
   }
 
-  const config = resolveDesktopLive2dConfig();
+  const config = resolveDesktopLive2dConfig({
+    projectRoot: projectRoot || undefined
+  });
   const modelValidation = validateModelAssetDirectory({
     modelDir: config.modelDir,
     modelJsonName: config.modelJsonName
