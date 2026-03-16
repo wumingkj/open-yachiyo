@@ -590,8 +590,8 @@ class ToolLoopRunner {
         );
         const satisfiedTurnRequirementPrompt = buildSatisfiedTurnRequirementPrompt(ctx.turnRequirements, allAvailableTools);
         const reasonerMessages = [
-          ...ctx.messages,
           ...(satisfiedTurnRequirementPrompt ? [{ role: 'system', content: satisfiedTurnRequirementPrompt }] : []),
+          ...ctx.messages,
           ...(ctx.desktopCaptureAttachment?.analysis_prompt
             ? [{ role: 'system', content: ctx.desktopCaptureAttachment.analysis_prompt }]
             : []),
@@ -1039,17 +1039,9 @@ class ToolLoopRunner {
 
             if (!ctx.turnRequirements.live2d_satisfied && isLive2dToolName(effectiveCall.name)) {
               ctx.turnRequirements.live2d_satisfied = true;
-              ctx.messages.push({
-                role: 'system',
-                content: 'Status update for the current reply turn: one live2d.* action has completed successfully. Do not call another live2d.* tool before producing the final answer.'
-              });
             }
             if (!ctx.turnRequirements.voice_tts_satisfied && isVoiceAutoReplyToolName(effectiveCall.name)) {
               ctx.turnRequirements.voice_tts_satisfied = true;
-              ctx.messages.push({
-                role: 'system',
-                content: 'Status update for the current reply turn: voice.tts_aliyun_vc has completed successfully. Do not call voice.tts_aliyun_vc again before producing the final answer.'
-              });
             }
 
             const desktopCaptureArtifact = normalizeDesktopCaptureArtifact(effectiveCall.name, toolResult.result);
