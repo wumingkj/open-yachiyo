@@ -19,6 +19,7 @@ const { createDesktopPerceptionService } = require('./desktopPerceptionService')
 const { createDesktopCaptureStore } = require('./desktopCaptureStore');
 const { createDesktopCaptureService } = require('./desktopCaptureService');
 const { TtsProviderFactory } = require('./voice/ttsProviderFactory');
+const { IdleChatter } = require('./idleChatter');
 const {
   ACTION_EVENT_NAME,
   ACTION_ENQUEUE_METHOD,
@@ -2603,6 +2604,7 @@ async function startDesktopSuite({
     };
 
     streamingState.active = false;
+    if (hadActive) idleChatter?.setStreamingState?.(false);
     streamingState.receivedText = '';
     streamingState.bufferedText = '';
     streamingState.sentenceQueue = [];
@@ -2635,6 +2637,7 @@ async function startDesktopSuite({
 
     if (!streamingState.active) {
       streamingState.active = true;
+      idleChatter.setStreamingState(true);
       streamingState.receivedText = '';
       streamingState.bufferedText = '';
       streamingState.sentenceQueue = [];
@@ -3178,9 +3181,19 @@ async function startDesktopSuite({
   gatewayRuntimeClient.startNotificationStream();
   logger.info?.('[desktop-live2d] notification_stream_started');
 
+  // ---- Idle Chatter (proactive chat when user is idle) ----
+  const idleChatter = new IdleChatter({
+    runInput: (opts) => gatewayRuntimeClient.runInput(opts),
+    appendChatMessage,
+    showBubble,
+    logger
+  });
+  idleChatter.start();
+
   const chatInputListener = createChatInputListener({
     logger,
     onChatInput: (payload) => {
+      idleChatter.notifyUserActivity();
       const text = String(payload?.text || '').trim();
       const inputImages = Array.isArray(payload?.input_images) ? payload.input_images : [];
       const isNewSession = isNewSessionCommand(text);

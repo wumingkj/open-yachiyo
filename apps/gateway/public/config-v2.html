@@ -71,6 +71,83 @@
           </div>
         </div>
 
+        <!-- Idle Chatter form-panel (only visible on idle-chatter tab) -->
+        <div id="cv2-idle-panel" class="cv2-idle-panel" hidden>
+          <!-- Master switch -->
+          <div class="cv2-idle-section">
+            <label class="cv2-idle-toggle">
+              <input type="checkbox" id="ic-enabled" />
+              <span>启用空闲闲聊</span>
+            </label>
+          </div>
+
+          <!-- Timing -->
+          <div class="cv2-idle-section">
+            <div class="cv2-idle-section-title">Timing</div>
+            <div class="cv2-idle-grid">
+              <div class="cv2-idle-field">
+                <label for="ic-idle-threshold">空闲触发阈值 (秒)</label>
+                <input type="number" id="ic-idle-threshold" min="30" step="30" />
+                <span class="cv2-idle-hint">用户无操作多久后触发</span>
+              </div>
+              <div class="cv2-idle-field">
+                <label for="ic-cooldown">冷却时间 (秒)</label>
+                <input type="number" id="ic-cooldown" min="60" step="60" />
+                <span class="cv2-idle-hint">两次触发的最小间隔</span>
+              </div>
+              <div class="cv2-idle-field">
+                <label for="ic-jitter">随机抖动 (秒)</label>
+                <input type="number" id="ic-jitter" min="0" step="30" />
+                <span class="cv2-idle-hint">避免机械感的随机延迟</span>
+              </div>
+              <div class="cv2-idle-field">
+                <label for="ic-max-per-hour">每小时最大次数</label>
+                <input type="number" id="ic-max-per-hour" min="1" max="20" />
+              </div>
+              <div class="cv2-idle-field">
+                <label for="ic-startup-delay">启动延迟 (秒)</label>
+                <input type="number" id="ic-startup-delay" min="0" step="10" />
+              </div>
+              <div class="cv2-idle-field">
+                <label class="cv2-idle-toggle">
+                  <input type="checkbox" id="ic-suppress-during-response" />
+                  <span>回复中抑制触发</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Topics -->
+          <div class="cv2-idle-section">
+            <div class="cv2-idle-section-title">
+              Topics
+              <button class="btn cv2-pp-add-btn" id="ic-add-topic-btn" type="button">+ Add</button>
+            </div>
+            <div id="ic-topics-list" class="cv2-idle-tags"></div>
+          </div>
+
+          <!-- Time Greetings -->
+          <div class="cv2-idle-section">
+            <div class="cv2-idle-section-title">
+              Time Greetings
+              <button class="btn cv2-pp-add-btn" id="ic-add-greeting-btn" type="button">+ Add</button>
+            </div>
+            <div id="ic-greetings-list" class="cv2-idle-greetings"></div>
+          </div>
+
+          <!-- System Prompt -->
+          <div class="cv2-idle-section">
+            <div class="cv2-idle-section-title">System Prompt Prefix</div>
+            <textarea id="ic-system-prompt" class="cv2-idle-textarea" rows="3" placeholder="发送给 LLM 的系统前缀..."></textarea>
+          </div>
+
+          <!-- Form actions -->
+          <div class="cv2-idle-actions">
+            <button class="btn btn-primary" id="ic-save-btn" type="button">保存配置</button>
+            <button class="btn" id="ic-reset-btn" type="button">重置</button>
+          </div>
+        </div>
+
         <div class="cv2-editor-wrap">
           <textarea
             id="editor"

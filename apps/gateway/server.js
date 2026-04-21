@@ -92,6 +92,8 @@ const skillConfigStore = new SkillConfigStore();
 const toolConfigStore = toolConfigManager.store;
 const voicePolicyPath = process.env.VOICE_POLICY_PATH
   || require('node:path').resolve(runtimePaths.configDir, 'voice-policy.yaml');
+const idleChatterPath = process.env.IDLE_CHATTER_CONFIG_PATH
+  || require('node:path').resolve(runtimePaths.configDir, 'idle-chatter.yaml');
 const desktopLive2dConfigPath = process.env.DESKTOP_LIVE2D_CONFIG_PATH
   || require('node:path').resolve(runtimePaths.configDir, 'desktop-live2d.json');
 const bundledReferenceAudioPath = path.resolve(
@@ -784,7 +786,7 @@ app.put('/api/config/providers/raw', (req, res) => {
 // --- Config v2: 专属 config git 仓库 ---
 // 使用 runtime configDir（~/yachiyo/config/）作为独立 git 仓库，与项目仓库完全隔离
 const CONFIG_GIT_DIR = getRuntimePaths().configDir;
-const CONFIG_FILES = ['providers.yaml', 'tools.yaml', 'skills.yaml', 'persona.yaml', 'voice-policy.yaml', 'desktop-live2d.json'];
+const CONFIG_FILES = ['providers.yaml', 'tools.yaml', 'skills.yaml', 'persona.yaml', 'voice-policy.yaml', 'idle-chatter.yaml', 'desktop-live2d.json'];
 
 // 启动时确保 config 目录已 git init，并配置 user 信息
 (function ensureConfigGitRepo() {
@@ -909,6 +911,33 @@ app.put('/api/config/voice-policy/raw', (req, res) => {
     YAML.parse(yaml); // 基础语法校验
     fsSync.writeFileSync(voicePolicyPath, yaml, 'utf8');
     commitConfigChange('voice-policy.yaml');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || String(err) });
+  }
+});
+
+// --- Config v2: idle-chatter.yaml ---
+app.get('/api/config/idle-chatter/raw', (_, res) => {
+  try {
+    const yaml = fsSync.existsSync(idleChatterPath) ? fsSync.readFileSync(idleChatterPath, 'utf8') : '';
+    res.json({ ok: true, yaml });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || String(err) });
+  }
+});
+
+app.put('/api/config/idle-chatter/raw', (req, res) => {
+  const yaml = req.body?.yaml;
+  if (typeof yaml !== 'string') {
+    res.status(400).json({ ok: false, error: 'body.yaml must be a string' });
+    return;
+  }
+  try {
+    const YAML = require('yaml');
+    YAML.parse(yaml);
+    fsSync.writeFileSync(idleChatterPath, yaml, 'utf8');
+    commitConfigChange('idle-chatter.yaml');
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message || String(err) });

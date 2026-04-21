@@ -1,0 +1,88 @@
+# ============================================================
+# Idle Chatter Configuration
+# ============================================================
+# 八千代的主动闲聊设置。
+# 当用户长时间无操作时，她会随机发起简短的对话。
+# ============================================================
+
+# 总开关 — 设为 false 完全禁用
+enabled: true
+
+# ---- Timing ----
+
+# 用户无操作多久后触发（秒）
+idle_threshold_sec: 300
+
+# 两次触发的最小间隔（秒）
+cooldown_sec: 600
+
+# 随机抖动（秒），加在 idle_threshold 上避免太机械
+# 实际触发时间 = idle_threshold + random(0, jitter)
+jitter_sec: 120
+
+# 每小时最大触发次数
+max_per_hour: 3
+
+# 启动后延迟生效（秒），给初始化留时间
+startup_delay_sec: 60
+
+# ---- 定时问候 ----
+# 在特定时间点发送特殊问候，one_shot 表示每天只触发一次
+
+time_greetings:
+  - hour: 7
+    minute: 30
+    topic: "early morning, gentle wake-up greeting"
+    one_shot: true
+  - hour: 9
+    minute: 0
+    topic: "morning, ask what the user plans to do today"
+    one_shot: true
+  - hour: 12
+    minute: 0
+    topic: "lunch time, remind user to eat and rest eyes"
+    one_shot: true
+  - hour: 15
+    minute: 0
+    topic: "afternoon, check in on the user's progress"
+    one_shot: true
+  - hour: 18
+    minute: 30
+    topic: "evening, ask about dinner and wind down"
+    one_shot: true
+  - hour: 22
+    minute: 0
+    topic: "late night, remind user to rest and not stay up too late"
+    one_shot: true
+
+# ---- 空闲话题 ----
+# 随机选取，作为上下文发送给 LLM 引导对话方向
+# 设为 [] 可让 LLM 自由发挥
+
+topics:
+  - "notice the silence and softly break it"
+  - "share a brief thought about time passing"
+  - "mention the current weather or season in a poetic way"
+  - "express gentle concern about the user sitting too long"
+  - "recall a small detail about the user and ask about it"
+  - "share a calm observation about the workspace environment"
+  - "hum a song fragment or reference music"
+  - "reflect on the concept of waiting and patience"
+  - "lightly tease the user for being quiet"
+  - "share a short wish or blessing for the user"
+
+# ---- System Prompt ----
+# 附加在空闲输入前的系统指令，帮助 LLM 理解这是主动发起的消息
+
+system_prompt_prefix: >
+  [System: This is a proactive idle chat.
+  The user has been idle for a while. Generate a SHORT message (1-2 sentences max).
+  Be natural, warm, and in character — like noticing someone nearby and softly speaking up.
+  Do NOT ask questions that require a long response. Keep it low-pressure.
+  You may stay silent (output a single short sentence or observation) rather than demanding engagement.
+  Stay true to your persona: calm, understated, slightly poetic when appropriate.]
+
+# ---- 抑制 ----
+
+# LLM 正在回复（流式输出）时不触发
+suppress_during_response: true

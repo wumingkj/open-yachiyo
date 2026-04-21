@@ -6,6 +6,7 @@ const TABS = [
   { id: 'skills',         label: 'skills',         getUrl: '/api/config/skills/raw',       putUrl: '/api/config/skills/raw',       bodyKey: 'yaml' },
   { id: 'persona',        label: 'persona',        getUrl: '/api/config/persona/raw',      putUrl: '/api/config/persona/raw',      bodyKey: 'yaml' },
   { id: 'voice-policy',   label: 'voice-policy',   getUrl: '/api/config/voice-policy/raw', putUrl: '/api/config/voice-policy/raw', bodyKey: 'yaml' },
+  { id: 'idle-chatter',   label: 'idle-chatter',   getUrl: '/api/config/idle-chatter/raw', putUrl: '/api/config/idle-chatter/raw', bodyKey: 'yaml' },
   { id: 'desktop-live2d', label: 'desktop-live2d', getUrl: '/api/config/desktop-live2d/raw', putUrl: '/api/config/desktop-live2d/raw', bodyKey: 'json' },
 ];
 
@@ -44,6 +45,22 @@ const el = {
   activeTts:     document.getElementById('cv2-activeTts'),
   addTtsBtn:     document.getElementById('cv2-addTtsBtn'),
   ttsCards:      document.getElementById('cv2-ttsCards'),
+  // Idle chatter panel
+  idlePanel:        document.getElementById('cv2-idle-panel'),
+  icEnabled:        document.getElementById('ic-enabled'),
+  icIdleThreshold:  document.getElementById('ic-idle-threshold'),
+  icCooldown:       document.getElementById('ic-cooldown'),
+  icJitter:         document.getElementById('ic-jitter'),
+  icMaxPerHour:     document.getElementById('ic-max-per-hour'),
+  icStartupDelay:   document.getElementById('ic-startup-delay'),
+  icSuppressResp:   document.getElementById('ic-suppress-during-response'),
+  icTopicsList:     document.getElementById('ic-topics-list'),
+  icGreetingsList:  document.getElementById('ic-greetings-list'),
+  icSystemPrompt:   document.getElementById('ic-system-prompt'),
+  icAddTopicBtn:    document.getElementById('ic-add-topic-btn'),
+  icAddGreetingBtn: document.getElementById('ic-add-greeting-btn'),
+  icSaveBtn:        document.getElementById('ic-save-btn'),
+  icResetBtn:       document.getElementById('ic-reset-btn'),
 };
 
 let activeTabId = TABS[0].id;
@@ -134,6 +151,11 @@ function switchTab(id) {
   el.providerPanel.hidden = !isProviders;
   if (isProviders) refreshProviderPanel();
 
+  // Show idle-chatter form only on idle-chatter tab
+  const isIdleChatter = tab.id === 'idle-chatter';
+  el.idlePanel.hidden = !isIdleChatter;
+  if (isIdleChatter) refreshIdlePanel();
+
   if (tab.readonly) {
     el.readonlyBadge.hidden = false;
     el.saveBtn.disabled = true;
@@ -160,6 +182,7 @@ async function loadTab() {
     el.editor.value = data[tab.bodyKey] || '';
     setStatus('已加载');
     if (activeTabId === 'providers') refreshProviderPanel();
+    if (activeTabId === 'idle-chatter') refreshIdlePanel();
   } catch (err) {
     setStatus(err.message, true);
   }
@@ -665,6 +688,276 @@ function addTtsProviderFromPanel() {
   setStatus(`已添加 TTS Provider: ${key} (${selected.label})`);
 }
 
+// ── Idle Chatter form-panel ─────────────────────────────────────────────
+
+function parseIdleChatter() {
+  const text = el.editor.value;
+  const get = (key, fallback) => {
+    const m = text.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'));
+    if (m === null) return fallback;
+    const v = m[1].trim();
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    const n = Number(v);
+    return isNaN(n) ? v : n;
+  };
+
+  // Parse topics list
+  const topics = [];
+  let inTopics = false;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (/^topics:\s*/.test(line) && !line.startsWith(' ')) { inTopics = true; continue; }
+    if (inTopics && trimmed === '') continue;
+    if (inTopics && /^[a-zA-Z_]/.test(line) && !line.startsWith(' ')) break;
+    if (inTopics && line.startsWith('  - ')) {
+      topics.push(line.slice(4).trim().replace(/^["']|["']$/g, ''));
+    }
+  }
+
+  // Parse time_greetings list
+  const greetings = [];
+  let inGreetings = false;
+  let current = null;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (/^time_greetings:\s*/.test(line) && !line.startsWith(' ')) { inGreetings = true; continue; }
+    if (inGreetings && trimmed === '') continue;
+    if (inGreetings && /^[a-zA-Z_]/.test(line) && !line.startsWith(' ')) {
+      if (current) greetings.push(current);
+      break;
+    }
+    if (inGreetings && /^  -\s*$/.test(line)) {
+      if (current) greetings.push(current);
+      current = { hour: 0, minute: 0, topic: '', one_shot: true };
+      continue;
+    }
+    if (inGreetings && current && line.startsWith('    ')) {
+      const hourMatch = trimmed.match(/^hour:\s*(\d+)/);
+      const minMatch = trimmed.match(/^minute:\s*(\d+)/);
+      const topicMatch = trimmed.match(/^topic:\s*"?([^"]*)"?/);
+      const oneShotMatch = trimmed.match(/^one_shot:\s*(true|false)/);
+      if (hourMatch) current.hour = Number(hourMatch[1]);
+      if (minMatch) current.minute = Number(minMatch[1]);
+      if (topicMatch) current.topic = topicMatch[1].trim();
+      if (oneShotMatch) current.one_shot = oneShotMatch[1] === 'true';
+    }
+  }
+  if (current) greetings.push(current);
+
+  // Parse system_prompt_prefix (multiline > block)
+  let systemPrompt = '';
+  const spMatch = text.match(/^system_prompt_prefix:\s*>\s*\n([\s\S]*?)(?=\n^[a-zA-Z_#]|\n\S)/m);
+  if (spMatch) {
+    systemPrompt = spMatch[1].replace(/^  ?/gm, '').replace(/\n{2,}/g, '\n').trim();
+  }
+
+  return {
+    enabled: get('enabled', true),
+    idle_threshold_sec: get('idle_threshold_sec', 300),
+    cooldown_sec: get('cooldown_sec', 600),
+    jitter_sec: get('jitter_sec', 120),
+    max_per_hour: get('max_per_hour', 4),
+    startup_delay_sec: get('startup_delay_sec', 60),
+    suppress_during_response: get('suppress_during_response', true),
+    topics,
+    time_greetings: greetings,
+    system_prompt_prefix: systemPrompt,
+  };
+}
+
+function refreshIdlePanel() {
+  const cfg = parseIdleChatter();
+  el.icEnabled.checked = cfg.enabled;
+  el.icIdleThreshold.value = cfg.idle_threshold_sec;
+  el.icCooldown.value = cfg.cooldown_sec;
+  el.icJitter.value = cfg.jitter_sec;
+  el.icMaxPerHour.value = cfg.max_per_hour;
+  el.icStartupDelay.value = cfg.startup_delay_sec;
+  el.icSuppressResp.checked = cfg.suppress_during_response;
+  el.icSystemPrompt.value = cfg.system_prompt_prefix;
+
+  renderIdleTopics(cfg.topics);
+  renderIdleGreetings(cfg.time_greetings);
+}
+
+function renderIdleTopics(topics) {
+  el.icTopicsList.innerHTML = '';
+  topics.forEach((t, i) => {
+    const tag = document.createElement('span');
+    tag.className = 'cv2-idle-tag';
+    tag.textContent = t;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'cv2-idle-tag-remove';
+    removeBtn.textContent = '\u00d7';
+    removeBtn.title = '删除';
+    removeBtn.addEventListener('click', () => {
+      topics.splice(i, 1);
+      renderIdleTopics(topics);
+      syncIdleToEditor();
+    });
+    tag.appendChild(removeBtn);
+    el.icTopicsList.appendChild(tag);
+  });
+}
+
+function renderIdleGreetings(greetings) {
+  el.icGreetingsList.innerHTML = '';
+  greetings.forEach((g, i) => {
+    const row = document.createElement('div');
+    row.className = 'cv2-idle-greeting-row';
+
+    const timeInput = document.createElement('input');
+    timeInput.type = 'time';
+    timeInput.value = `${String(g.hour).padStart(2, '0')}:${String(g.minute).padStart(2, '0')}`;
+    timeInput.addEventListener('change', () => {
+      const [h, m] = timeInput.value.split(':').map(Number);
+      greetings[i].hour = h;
+      greetings[i].minute = m;
+      syncIdleToEditor();
+    });
+
+    const topicInput = document.createElement('input');
+    topicInput.type = 'text';
+    topicInput.className = 'cv2-idle-greeting-topic';
+    topicInput.value = g.topic;
+    topicInput.placeholder = 'topic hint';
+    topicInput.addEventListener('input', () => {
+      greetings[i].topic = topicInput.value;
+      syncIdleToEditor();
+    });
+
+    const oneShotLabel = document.createElement('label');
+    oneShotLabel.className = 'cv2-idle-toggle-sm';
+    const oneShotCheck = document.createElement('input');
+    oneShotCheck.type = 'checkbox';
+    oneShotCheck.checked = g.one_shot;
+    oneShotCheck.addEventListener('change', () => {
+      greetings[i].one_shot = oneShotCheck.checked;
+      syncIdleToEditor();
+    });
+    oneShotLabel.appendChild(oneShotCheck);
+    oneShotLabel.appendChild(document.createTextNode('once'));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'cv2-idle-tag-remove';
+    removeBtn.textContent = '\u00d7';
+    removeBtn.title = '删除';
+    removeBtn.addEventListener('click', () => {
+      greetings.splice(i, 1);
+      renderIdleGreetings(greetings);
+      syncIdleToEditor();
+    });
+
+    row.append(timeInput, topicInput, oneShotLabel, removeBtn);
+    el.icGreetingsList.appendChild(row);
+  });
+}
+
+function syncIdleToEditor() {
+  const cfg = {
+    enabled: el.icEnabled.checked,
+    idle_threshold_sec: Number(el.icIdleThreshold.value) || 300,
+    cooldown_sec: Number(el.icCooldown.value) || 600,
+    jitter_sec: Number(el.icJitter.value) || 0,
+    max_per_hour: Number(el.icMaxPerHour.value) || 4,
+    startup_delay_sec: Number(el.icStartupDelay.value) || 60,
+    suppress_during_response: el.icSuppressResp.checked,
+  };
+
+  // Gather topics from rendered tags
+  const topicTags = el.icTopicsList.querySelectorAll('.cv2-idle-tag');
+  const topics = [...topicTags].map(t => t.textContent.replace(/\u00d7$/, '').trim());
+
+  // Gather greetings from rendered rows
+  const greetingRows = el.icGreetingsList.querySelectorAll('.cv2-idle-greeting-row');
+  const greetings = [...greetingRows].map(row => {
+    const [h, m] = (row.querySelector('input[type="time"]').value || '0:0').split(':').map(Number);
+    return {
+      hour: h || 0,
+      minute: m || 0,
+      topic: row.querySelector('.cv2-idle-greeting-topic').value,
+      one_shot: row.querySelector('input[type="checkbox"]').checked,
+    };
+  });
+
+  const systemPrompt = el.icSystemPrompt.value.trim();
+
+  // Build YAML
+  let yaml = `# ============================================================\n`;
+  yaml += `# Idle Chatter Configuration\n`;
+  yaml += `# ============================================================\n`;
+  yaml += `# Controls the proactive chat feature when the user is idle.\n`;
+  yaml += `# The desktop pet will randomly initiate conversation based on\n`;
+  yaml += `# the settings below.\n`;
+  yaml += `# ============================================================\n\n`;
+
+  yaml += `# Master switch — set to false to completely disable idle chatter\n`;
+  yaml += `enabled: ${cfg.enabled}\n\n`;
+
+  yaml += `# ---- Timing ----\n\n`;
+  yaml += `# Minimum idle time (seconds) before the first idle chat can trigger\n`;
+  yaml += `# Default: 300 (5 minutes)\n`;
+  yaml += `idle_threshold_sec: ${cfg.idle_threshold_sec}\n\n`;
+
+  yaml += `# After an idle chat is triggered, minimum cooldown (seconds) before the next one\n`;
+  yaml += `# Default: 600 (10 minutes)\n`;
+  yaml += `cooldown_sec: ${cfg.cooldown_sec}\n\n`;
+
+  yaml += `# Random jitter range (seconds) added to idle_threshold to avoid mechanical timing\n`;
+  yaml += `# e.g. jitter_sec: 120 means the actual trigger time is idle_threshold + random(0, 120)\n`;
+  yaml += `# Set to 0 to disable jitter\n`;
+  yaml += `jitter_sec: ${cfg.jitter_sec}\n\n`;
+
+  yaml += `# Maximum number of idle chats per hour (rate limiting)\n`;
+  yaml += `# Default: 4\n`;
+  yaml += `max_per_hour: ${cfg.max_per_hour}\n\n`;
+
+  yaml += `# ---- Trigger Contexts ----\n\n`;
+  yaml += `# Time-based greetings — special messages at specific times of day\n`;
+  yaml += `# Each entry has hour/minute and a topic hint sent to the LLM\n`;
+  yaml += `# The LLM will generate appropriate greeting based on persona\n`;
+  yaml += `time_greetings:\n`;
+  if (greetings.length === 0) {
+    yaml += `  []\n`;
+  } else {
+    greetings.forEach(g => {
+      yaml += `  - hour: ${g.hour}\n`;
+      yaml += `    minute: ${g.minute}\n`;
+      yaml += `    topic: "${g.topic}"\n`;
+      yaml += `    one_shot: ${g.one_shot}\n`;
+    });
+  }
+  yaml += `\n# ---- Idle Topics ----\n\n`;
+  yaml += `# Pool of topic hints that are randomly selected when idle chatter triggers\n`;
+  yaml += `# These are sent as context to the LLM to guide conversation direction\n`;
+  yaml += `# Use empty list [] to let the LLM freely choose topics\n`;
+  yaml += `topics:\n`;
+  if (topics.length === 0) {
+    yaml += `  []\n`;
+  } else {
+    topics.forEach(t => { yaml += `  - "${t}"\n`; });
+  }
+  yaml += `\n# ---- System Prompt ----\n\n`;
+  yaml += `# Prefix added to the idle input to instruct the LLM this is a proactive message\n`;
+  yaml += `# This helps the LLM understand the context and adjust tone\n`;
+  yaml += `system_prompt_prefix: >\n`;
+  if (systemPrompt) {
+    systemPrompt.split('\n').forEach(line => { yaml += `  ${line}\n`; });
+  }
+  yaml += `\n# ---- Suppression ----\n\n`;
+  yaml += `# Do not trigger idle chat while there is an active LLM response (streaming)\n`;
+  yaml += `suppress_during_response: ${cfg.suppress_during_response}\n\n`;
+
+  yaml += `# Minimum time (seconds) after app launch before idle chat can trigger\n`;
+  yaml += `# Default: 60\n`;
+  yaml += `startup_delay_sec: ${cfg.startup_delay_sec}\n`;
+
+  el.editor.value = yaml;
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 function init() {
   initTheme();
@@ -691,6 +984,44 @@ function init() {
   el.activeLlm.addEventListener('change', () => setActiveLlm(el.activeLlm.value));
   el.activeTts.addEventListener('change', () => setActiveTts(el.activeTts.value));
   el.addTtsBtn.addEventListener('click', addTtsProviderFromPanel);
+
+  // Idle chatter panel events
+  el.icAddTopicBtn.addEventListener('click', () => {
+    const topic = window.prompt('输入新 topic hint:');
+    if (!topic) return;
+    const tags = el.icTopicsList.querySelectorAll('.cv2-idle-tag');
+    const topics = [...tags].map(t => t.textContent.replace(/\u00d7$/, '').trim());
+    topics.push(topic.trim());
+    renderIdleTopics(topics);
+    syncIdleToEditor();
+  });
+  el.icAddGreetingBtn.addEventListener('click', () => {
+    const tags = el.icTopicsList.querySelectorAll('.cv2-idle-tag');
+    const greetingRows = el.icGreetingsList.querySelectorAll('.cv2-idle-greeting-row');
+    const greetings = [...greetingRows].map(row => {
+      const [h, m] = (row.querySelector('input[type="time"]').value || '0:0').split(':').map(Number);
+      return {
+        hour: h || 0, minute: m || 0,
+        topic: row.querySelector('.cv2-idle-greeting-topic').value,
+        one_shot: row.querySelector('input[type="checkbox"]').checked,
+      };
+    });
+    greetings.push({ hour: 12, minute: 0, topic: '', one_shot: true });
+    renderIdleGreetings(greetings);
+    syncIdleToEditor();
+  });
+  el.icSaveBtn.addEventListener('click', () => {
+    syncIdleToEditor();
+    saveTab();
+  });
+  el.icResetBtn.addEventListener('click', () => {
+    refreshIdlePanel();
+  });
+  // Auto-sync simple fields on change
+  ['icEnabled', 'icIdleThreshold', 'icCooldown', 'icJitter', 'icMaxPerHour', 'icStartupDelay', 'icSuppressResp', 'icSystemPrompt'].forEach(id => {
+    el[id].addEventListener('change', syncIdleToEditor);
+    el[id].addEventListener('input', syncIdleToEditor);
+  });
 
   initWs();
 }
