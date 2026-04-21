@@ -30,6 +30,7 @@
     </header>
 
     <section class="panel">
+      <h2 style="margin:0 0 10px">LLM Provider</h2>
       <div class="row">
         <label for="activeProviderSelect">Active Provider</label>
         <select id="activeProviderSelect"></select>
@@ -39,6 +40,19 @@
         <span id="statusText" class="status"></span>
       </div>
       <div id="providerCards" class="provider-cards"></div>
+    </section>
+
+    <section class="panel">
+      <h2 style="margin:0 0 10px">TTS Provider</h2>
+      <div class="row">
+        <label for="activeTtsProviderSelect">Active TTS Provider</label>
+        <select id="activeTtsProviderSelect"></select>
+      </div>
+      <div class="row">
+        <button id="addTtsProviderBtn" class="btn">Add TTS Provider</button>
+        <span id="ttsStatusText" class="status"></span>
+      </div>
+      <div id="ttsProviderCards" class="provider-cards"></div>
     </section>
 
     <section class="panel">

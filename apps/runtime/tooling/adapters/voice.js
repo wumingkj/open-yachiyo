@@ -6,7 +6,7 @@ const { InMemoryVoiceCooldownStore, InMemoryVoiceIdempotencyStore, InMemoryVoice
 const { ProviderConfigStore } = require('../../config/providerConfigStore');
 const { getRuntimePaths } = require('../../skills/runtimePaths');
 
-// TTS provider name in providers.yaml
+// TTS provider name in providers.yaml — resolved dynamically
 const TTS_PROVIDER_KEY = process.env.TTS_PROVIDER_KEY || 'qwen3_tts';
 const JP_TTS_HARD_REPLACEMENTS = Object.freeze({
   '八千代': 'やちよ'
@@ -17,7 +17,8 @@ function loadTtsProviderConfig() {
     const store = new ProviderConfigStore();
     const config = store.load();
     const provider = config.providers && config.providers[TTS_PROVIDER_KEY];
-    if (!provider || provider.type !== 'tts_dashscope') {
+    // Accept any 'tts_*' type, not just 'tts_dashscope'
+    if (!provider || typeof provider.type !== 'string' || !provider.type.startsWith('tts_')) {
       return null;
     }
     return provider;

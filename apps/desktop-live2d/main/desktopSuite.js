@@ -18,8 +18,7 @@ const { listDesktopTools, resolveToolInvoke } = require('./toolRegistry');
 const { createDesktopPerceptionService } = require('./desktopPerceptionService');
 const { createDesktopCaptureStore } = require('./desktopCaptureStore');
 const { createDesktopCaptureService } = require('./desktopCaptureService');
-const { QwenTtsClient } = require('./voice/qwenTtsClient');
-const { QwenTtsRealtimeClient } = require('./voice/qwenTtsRealtimeClient');
+const { TtsProviderFactory } = require('./voice/ttsProviderFactory');
 const {
   ACTION_EVENT_NAME,
   ACTION_ENQUEUE_METHOD,
@@ -1503,27 +1502,41 @@ async function processVoiceRequestedOnDesktop({
     const preferStreamingPlayback = String(process.env.DESKTOP_VOICE_STREAMING_PLAYBACK || 'true')
       .trim()
       .toLowerCase() !== 'false';
+    const voiceTag = String(eventPayload?.voiceTag || '').trim().toLowerCase();
     const synthesis = await ttsClient.synthesizeNonStreaming({
       text,
       model,
       voice,
+      languageType: voiceTag || undefined,
       timeoutMs: timeoutSec * 1000
     });
+
+    // Some providers (Edge TTS, Windows SAPI, GPT-SoVITS) return audioBuffer
+    // directly instead of a remote audioUrl. Always use the memory-buffer path
+    // when audioBuffer is available.
+    const hasInlineBuffer = synthesis.audioBuffer && synthesis.audioBuffer.length > 0;
+    const useMemoryBuffer = hasInlineBuffer || !synthesis.audioUrl;
+    const effectivePlaybackRoute = useMemoryBuffer ? 'memory_buffer'
+      : preferStreamingPlayback ? 'remote_stream'
+      : 'memory_buffer';
+
     let audioUrlHost = null;
-    try {
-      audioUrlHost = new URL(String(synthesis.audioUrl || '')).host || null;
-    } catch {
-      audioUrlHost = null;
+    if (!useMemoryBuffer) {
+      try {
+        audioUrlHost = new URL(String(synthesis.audioUrl || '')).host || null;
+      } catch {
+        audioUrlHost = null;
+      }
     }
 
     emitDebug?.('chain.electron.voice.synthesis.completed', 'electron main synthesized voice and resolved audio playback source', {
       request_id: requestId,
       session_id: sessionId,
       trace_id: traceId,
-      bytes: null,
+      bytes: synthesis.audioBuffer ? synthesis.audioBuffer.length : null,
       mime_type: synthesis.mimeType || null,
       model: synthesis.model || null,
-      playback_route: preferStreamingPlayback ? 'remote_stream' : 'memory_buffer',
+      playback_route: effectivePlaybackRoute,
       audio_url_host: audioUrlHost
     });
 
@@ -1534,16 +1547,34 @@ async function processVoiceRequestedOnDesktop({
         timestamp: Date.now(),
         data: {
           request_id: requestId,
-          bytes: null,
+          bytes: synthesis.audioBuffer ? synthesis.audioBuffer.length : null,
           mime_type: synthesis.mimeType,
           model: synthesis.model,
-          playback_route: preferStreamingPlayback ? 'remote_stream' : 'memory_buffer'
+          playback_route: effectivePlaybackRoute
         }
       }
     });
 
     if (!avatarWindow.isDestroyed()) {
-      if (preferStreamingPlayback) {
+      if (useMemoryBuffer) {
+        // Provider returned audio inline — no extra fetch needed
+        const rawBuf = synthesis.audioBuffer
+          || await ttsClient.fetchAudioBuffer({ audioUrl: synthesis.audioUrl, timeoutMs: timeoutSec * 1000 });
+        const audioBytes = new Uint8Array(rawBuf.buffer, rawBuf.byteOffset, rawBuf.byteLength);
+        avatarWindow.webContents.send('desktop:voice:play-memory', {
+          requestId,
+          audioBytes,
+          mimeType: synthesis.mimeType || 'audio/ogg',
+          outputDelayMs: voiceOutputDelayMs
+        });
+        emitDebug?.('chain.electron.voice.ipc.dispatched', 'electron main dispatched memory voice playback to renderer', {
+          request_id: requestId,
+          session_id: sessionId,
+          trace_id: traceId,
+          mime_type: synthesis.mimeType || 'audio/ogg',
+          bytes: audioBytes.byteLength
+        });
+      } else if (preferStreamingPlayback) {
         avatarWindow.webContents.send('desktop:voice:play-remote', {
           requestId,
           audioUrl: synthesis.audioUrl,
@@ -2900,8 +2931,16 @@ async function startDesktopSuite({
   };
   ipcMain.on(CHANNELS.windowInteractivity, avatarWindowInteractivityListener);
 
-  const qwenTtsClient = new QwenTtsClient();
-  const qwenTtsRealtimeClient = new QwenTtsRealtimeClient();
+  let ttsClient = null;
+  let realtimeTtsClient = null;
+  try {
+    ttsClient = TtsProviderFactory.createNonStreaming({ fetchImpl: globalThis.fetch });
+    realtimeTtsClient = TtsProviderFactory.createStreaming();
+  } catch (ttsInitErr) {
+    logger.warn?.('[desktop-live2d] TTS provider init failed — voice synthesis will be unavailable', {
+      error: ttsInitErr?.message || String(ttsInitErr)
+    });
+  }
   const recentVoiceRequestIds = new Map();
   const VOICE_REQUEST_DEDUP_TTL_MS = 120000;
 
@@ -3003,8 +3042,8 @@ async function startDesktopSuite({
           }
           void processVoiceRequestedOnDesktop({
             eventPayload: voicePayload,
-            ttsClient: qwenTtsClient,
-            realtimeTtsClient: qwenTtsRealtimeClient,
+            ttsClient,
+            realtimeTtsClient,
             voiceConfig: config.uiConfig?.voice || {},
             avatarWindow,
             rpcServerRef,

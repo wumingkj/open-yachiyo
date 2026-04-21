@@ -49,6 +49,28 @@
           </div>
         </div>
 
+        <!-- Provider quick-panel (only visible on providers tab) -->
+        <div id="cv2-provider-panel" class="cv2-provider-panel" hidden>
+          <div class="cv2-pp-section">
+            <div class="cv2-pp-head">
+              <strong>Active LLM Provider</strong>
+            </div>
+            <div class="cv2-pp-row">
+              <select id="cv2-activeLlm" aria-label="Active LLM Provider"></select>
+            </div>
+          </div>
+          <div class="cv2-pp-section">
+            <div class="cv2-pp-head">
+              <strong>Active TTS Provider</strong>
+              <button class="btn cv2-pp-add-btn" id="cv2-addTtsBtn" type="button">+ Add TTS</button>
+            </div>
+            <div class="cv2-pp-row">
+              <select id="cv2-activeTts" aria-label="Active TTS Provider"></select>
+            </div>
+            <div id="cv2-ttsCards" class="cv2-pp-cards"></div>
+          </div>
+        </div>
+
         <div class="cv2-editor-wrap">
           <textarea
             id="editor"

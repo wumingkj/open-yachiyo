@@ -1,104 +1,51 @@
-const WebSocket = require('ws');
 const { randomUUID } = require('node:crypto');
-
+const { TtsProviderBase } = require('./ttsProviderBase');
 const { ProviderConfigStore } = require('../../../runtime/config/providerConfigStore');
 
-const TTS_PROVIDER_KEY = process.env.TTS_PROVIDER_KEY || 'qwen3_tts';
+const DEFAULT_TTS_PROVIDER_KEY = 'qwen3_tts';
+const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
+const DEFAULT_REALTIME_MODEL = 'qwen-tts-realtime';
+const WebSocket = require('ws');
 
-function resolveApiKey(provider) {
-  if (!provider || typeof provider !== 'object') return '';
-  if (typeof provider.api_key === 'string' && provider.api_key.trim()) return provider.api_key.trim();
-  if (typeof provider.api_key_env === 'string' && provider.api_key_env.trim()) {
-    return String(process.env[provider.api_key_env] || '').trim();
-  }
-  return '';
-}
-
-function normalizeBaseUrl(baseUrl) {
-  const raw = String(baseUrl || '').trim() || 'https://dashscope.aliyuncs.com/api/v1';
-  return raw.replace(/\/$/, '');
-}
-
-function deriveRealtimeWsBaseUrl(httpBaseUrl) {
-  const base = normalizeBaseUrl(httpBaseUrl);
-  try {
-    const parsed = new URL(base);
-    const host = parsed.hostname;
-    if (host === 'dashscope.aliyuncs.com') {
-      return 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
-    }
-    if (host === 'dashscope-intl.aliyuncs.com') {
-      return 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime';
-    }
-    parsed.protocol = parsed.protocol === 'http:' ? 'ws:' : 'wss:';
-    parsed.pathname = '/api-ws/v1/realtime';
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString().replace(/\/$/, '');
-  } catch (_) {
-    return 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
-  }
-}
-
-function buildRealtimeWsUrl({ wsBaseUrl, model }) {
-  const base = String(wsBaseUrl || '').trim();
-  const finalModel = String(model || '').trim() || 'qwen-tts-realtime';
-  const parsed = new URL(base);
-  parsed.searchParams.set('model', finalModel);
-  return parsed.toString();
-}
-
-function parseWsMessage(raw) {
-  try {
-    return JSON.parse(String(raw || ''));
-  } catch {
-    return null;
-  }
-}
-
-function estimateBase64Bytes(data) {
-  const payload = String(data || '').trim();
-  if (!payload) return 0;
-  try {
-    return Buffer.from(payload, 'base64').byteLength;
-  } catch {
-    return 0;
-  }
-}
-
-class QwenTtsRealtimeClient {
-  constructor({ WebSocketImpl = WebSocket } = {}) {
+class QwenTtsRealtimeClient extends TtsProviderBase {
+  /**
+   * @param {object} [opts]
+   * @param {Function} [opts.WebSocketImpl] - WebSocket constructor (default: 'ws')
+   * @param {string}  [opts.providerKey]    - provider key in providers.yaml
+   */
+  constructor({ WebSocketImpl, providerKey } = {}) {
+    super({ WebSocketImpl: WebSocketImpl || WebSocket });
     this.providerStore = new ProviderConfigStore();
-    this.WebSocketImpl = WebSocketImpl;
+    this._providerKey = providerKey || process.env.TTS_PROVIDER_KEY || DEFAULT_TTS_PROVIDER_KEY;
   }
+
+  get providerType() { return 'tts_dashscope'; }
+  get displayName() { return 'DashScope TTS (realtime streaming)'; }
+  get defaultAudioFormat() { return 'pcm'; }
+  get defaultSampleRate() { return 24000; }
+  get supportsNonStreaming() { return false; }
+  get supportsStreaming() { return true; }
 
   loadProviderConfig() {
     const config = this.providerStore.load();
-    const provider = config?.providers?.[TTS_PROVIDER_KEY];
-    if (!provider || provider.type !== 'tts_dashscope') {
-      const err = new Error(`tts provider ${TTS_PROVIDER_KEY} is missing or invalid`);
-      err.code = 'TTS_CONFIG_MISSING';
-      throw err;
-    }
-
-    const apiKey = resolveApiKey(provider);
-    if (!apiKey) {
-      const err = new Error('tts provider api key is missing');
-      err.code = 'TTS_CONFIG_MISSING';
-      throw err;
-    }
+    const provider = config?.providers?.[this._providerKey];
+    const validated = this.validateProviderConfig(provider, this._providerKey);
 
     const wsBaseUrl = String(
-      provider.realtime_ws_url
+      validated.realtime_ws_url
       || process.env.DASHSCOPE_REALTIME_WS_URL
-      || deriveRealtimeWsBaseUrl(provider.base_url)
+      || deriveRealtimeWsBaseUrl(validated.base_url)
     ).trim();
 
-    const defaultRealtimeModel = String(provider.tts_realtime_model || provider.realtime_model || 'qwen-tts-realtime');
-    const defaultVoice = String(provider.tts_realtime_voice || provider.realtime_voice || provider.tts_voice || '');
+    const defaultRealtimeModel = String(
+      validated.tts_realtime_model || validated.realtime_model || DEFAULT_REALTIME_MODEL
+    );
+    const defaultVoice = String(
+      validated.tts_realtime_voice || validated.realtime_voice || validated.tts_voice || ''
+    );
 
     return {
-      apiKey,
+      apiKey: validated._resolvedApiKey,
       wsBaseUrl,
       defaultRealtimeModel,
       defaultVoice
@@ -319,6 +266,57 @@ class QwenTtsRealtimeClient {
         finish(err);
       });
     });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  DashScope-specific helpers (kept private)                          */
+/* ------------------------------------------------------------------ */
+
+function deriveRealtimeWsBaseUrl(httpBaseUrl) {
+  const base = String(httpBaseUrl || '').trim().replace(/\/$/, '') || DEFAULT_BASE_URL;
+  try {
+    const parsed = new URL(base);
+    const host = parsed.hostname;
+    if (host === 'dashscope.aliyuncs.com') {
+      return 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+    }
+    if (host === 'dashscope-intl.aliyuncs.com') {
+      return 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime';
+    }
+    parsed.protocol = parsed.protocol === 'http:' ? 'ws:' : 'wss:';
+    parsed.pathname = '/api-ws/v1/realtime';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch (_) {
+    return 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+  }
+}
+
+function buildRealtimeWsUrl({ wsBaseUrl, model }) {
+  const base = String(wsBaseUrl || '').trim();
+  const finalModel = String(model || '').trim() || DEFAULT_REALTIME_MODEL;
+  const parsed = new URL(base);
+  parsed.searchParams.set('model', finalModel);
+  return parsed.toString();
+}
+
+function parseWsMessage(raw) {
+  try {
+    return JSON.parse(String(raw || ''));
+  } catch {
+    return null;
+  }
+}
+
+function estimateBase64Bytes(data) {
+  const payload = String(data || '').trim();
+  if (!payload) return 0;
+  try {
+    return Buffer.from(payload, 'base64').byteLength;
+  } catch {
+    return 0;
   }
 }
 

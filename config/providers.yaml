@@ -1,20 +1,15 @@
 active_provider: qwen35_plus
+active_tts_provider: qwen3_tts
 providers:
   qwen35_plus:
-    type: openai_compatible
-    display_name: Qwen 3.5 Plus
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    model: qwen3.5-plus
+    type: qwen35
+    display_name: Qwen 3.5
+    base_url: https://localhost:11451/v1
+    model: qwen3.5:4b
     # api_key is intentionally omitted; use DASHSCOPE_API_KEY env var
-    api_key_env: DASHSCOPE_API_KEY
-    timeout_ms: 20000
-  openai:
-    type: openai_compatible
-    display_name: OpenAI
-    base_url: https://api.openai.com/v1
-    model: gpt-4o-mini
-    api_key_env: OPENAI_API_KEY
-    timeout_ms: 20000
+    api_key_env: ollama
+    timeout_ms: 60000
+
   qwen3_tts:
     type: tts_dashscope
     tts_model: qwen3-tts-vc-2026-01-22
@@ -24,3 +19,35 @@ providers:
     tts_realtime_voice: Cherry
     base_url: https://dashscope.aliyuncs.com/api/v1
     api_key_env: DASHSCOPE_API_KEY
+
+  # --- GPT-SoVITS (self-hosted) ---
+  # gpt_sovits:
+  #   type: tts_gpt_sovits
+  #   base_url: http://127.0.0.1:9880
+  #   tts_voice: default
+  #   tts_language: zh
+  #   endpoint: /tts
+  #   speed: 1.0
+  #   top_k: 5
+  #   top_p: 1.0
+  #   temperature: 1.0
+  #   ref_audio_path: ""
+  #   prompt_text: ""
+  #   prompt_language: zh
+  #   # api_key_env: GPT_SOVITS_API_KEY   # optional
+
+  # --- Edge TTS (Microsoft, free, no API key) ---
+  # edge_tts:
+  #   type: tts_edge
+  #   tts_voice: zh-CN-XiaoxiaoNeural
+  #   rate: "+0%"
+  #   pitch: "+0Hz"
+  #   volume: "+0%"
+  #   output_format: audio-24khz-48kbitrate-mono-mp3
+
+  # --- Windows SAPI (offline, no API key) ---
+  # windows_tts:
+  #   type: tts_windows
+  #   tts_voice: Microsoft Huihui Desktop
+  #   rate: 0
+  #   volume: 100
