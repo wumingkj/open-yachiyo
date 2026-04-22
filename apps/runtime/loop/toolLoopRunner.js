@@ -483,6 +483,7 @@ class ToolLoopRunner {
             'If shell.exec returns APPROVAL_REQUIRED, call shell.approve with approval_id, then retry shell.exec.',
             `If a tool returns an error, use the error details to re-plan and retry with an alternative approach. Maximum tool-error retries per run: ${this.toolErrorMaxRetries}.`,
             'Use persona.update_profile even in low permission sessions; this is globally allowed.',
+            'Language rule: text output (chat replies) MUST be in Chinese; voice output (TTS tool calls) MUST be in Japanese. When calling voice.tts_aliyun_vc, always write the text parameter in Japanese.',
             'Keep answers concise.'
           ].join(' ')
         },
