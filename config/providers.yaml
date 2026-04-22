@@ -1,5 +1,5 @@
 active_provider: qwen35_plus
-active_tts_provider: qwen3_tts
+active_tts_provider: gpt_sovits_1
 providers:
   qwen35_plus:
     type: qwen35
@@ -10,15 +10,31 @@ providers:
     api_key_env: ollama
     timeout_ms: 60000
 
-  qwen3_tts:
-    type: tts_dashscope
-    tts_model: qwen3-tts-vc-2026-01-22
-    tts_voice: qwen-tts-vc-yachiyo-voice-20260224022238839-5679
-    # Optional realtime defaults for desktop-live2d realtime transport.
-    tts_realtime_model: qwen3-tts-vc-realtime-2026-01-15
-    tts_realtime_voice: Cherry
-    base_url: https://dashscope.aliyuncs.com/api/v1
-    api_key_env: DASHSCOPE_API_KEY
+  gpt_sovits_1:
+    type: tts_gpt_sovits
+    base_url: http://127.0.0.1:9880
+    tts_voice: default
+    tts_language: auto
+    timeout_sec: 120
+    use_model_lang: false
+    endpoint: /tts
+    speed: 1
+    top_k: 5
+    top_p: 1
+    temperature: 1
+    ref_audio_path: C:\Users\Administrator\Documents\VS_code\open-yachiyo\ref_8s.mp3
+    prompt_text: ""
+    prompt_language: jp
+
+  # qwen3_tts:
+  #   type: tts_dashscope
+  #   tts_model: qwen3-tts-vc-2026-01-22
+  #   tts_voice: qwen-tts-vc-yachiyo-voice-20260224022238839-5679
+  #   # Optional realtime defaults for desktop-live2d realtime transport.
+  #   tts_realtime_model: qwen3-tts-vc-realtime-2026-01-15
+  #   tts_realtime_voice: Cherry
+  #   base_url: https://dashscope.aliyuncs.com/api/v1
+  #   api_key_env: DASHSCOPE_API_KEY
 
   # --- GPT-SoVITS (self-hosted) ---
   # gpt_sovits:

@@ -178,7 +178,7 @@ tools:
       type: object
       properties:
         text: { type: string }
-        voiceTag: { type: string, enum: [zh, jp, en] }
+        voiceTag: { type: string, enum: [zh, jp, en, auto], description: "Language tag for TTS. Use 'auto' for mixed/multilingual text (recommended)." }
         durationSec: { type: [number, string] }
         duration_sec: { type: [number, string] }
         timeoutSec: { type: integer, minimum: 1, maximum: 120 }

@@ -10,7 +10,9 @@
  *     type: tts_gpt_sovits
  *     base_url: http://127.0.0.1:9880
  *     tts_voice: default
- *     tts_language: zh
+ *     tts_language: auto
+ *     use_model_lang: false       # true = use LLM voiceTag; false = use tts_language from config
+ *     timeout_sec: 120            # request timeout in seconds (default 60)
  *     # optional — defaults shown
  *     endpoint: /tts
  *     speed: 1.0
@@ -58,10 +60,12 @@ class GptSovitsTtsProvider extends TtsProviderBase {
       topK: Number(validated.top_k ?? 5),
       topP: Number(validated.top_p ?? 1.0),
       temperature: Number(validated.temperature ?? 1.0),
+      useModelLang: validated.use_model_lang === true,
+      timeoutSec: Math.max(10, Number(validated.timeout_sec || 60)),
     };
   }
 
-  async synthesizeNonStreaming({ text, model, voice, languageType, timeoutMs = 60000 } = {}) {
+  async synthesizeNonStreaming({ text, model, voice, languageType, timeoutMs } = {}) {
     const content = String(text || '').trim();
     if (!content) {
       const err = new Error('text is required');
@@ -72,6 +76,8 @@ class GptSovitsTtsProvider extends TtsProviderBase {
     const cfg = this.loadProviderConfig();
     const finalModel = String(model || cfg.defaultModel);
     const finalVoice = String(voice || cfg.defaultVoice);
+    // Provider config timeout takes priority; fallback to caller timeout, then default 60s
+    const effectiveTimeoutMs = cfg.timeoutSec * 1000;
 
     // Map language type to GPT-SoVITS language code
     const langMap = {
@@ -79,10 +85,12 @@ class GptSovitsTtsProvider extends TtsProviderBase {
       'zh': 'zh', 'jp': 'ja', 'en': 'en', 'auto': 'auto',
       'yue': 'yue', 'ko': 'ko'
     };
-    const textLang = langMap[languageType] || langMap[cfg.defaultLanguage] || 'zh';
+    const textLang = (cfg.useModelLang && languageType && langMap[languageType])
+      ? langMap[languageType]
+      : langMap[cfg.defaultLanguage] || 'auto';
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
 
     try {
       const endpoint = `${cfg.baseUrl}${cfg.endpoint}`;

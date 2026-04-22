@@ -11,10 +11,10 @@ enabled: true
 # ---- Timing ----
 
 # 用户无操作多久后触发（秒）
-idle_threshold_sec: 300
+idle_threshold_sec: 60
 
 # 两次触发的最小间隔（秒）
-cooldown_sec: 600
+cooldown_sec: 60
 
 # 随机抖动（秒），加在 idle_threshold 上避免太机械
 # 实际触发时间 = idle_threshold + random(0, jitter)

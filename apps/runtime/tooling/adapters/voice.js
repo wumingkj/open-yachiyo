@@ -147,9 +147,9 @@ function shouldRetryOnce(err) {
 }
 
 function resolveVoiceTag(args) {
-  const input = String(args.voiceTag || 'zh').toLowerCase();
-  if (['zh', 'jp', 'en'].includes(input)) return input;
-  return 'zh';
+  const input = String(args.voiceTag || '').toLowerCase();
+  if (['zh', 'jp', 'en', 'auto'].includes(input)) return input;
+  return '';  // empty → let TTS provider fall back to its own defaultLanguage config
 }
 
 function normalizeTtsInputText(text, voiceTag) {
