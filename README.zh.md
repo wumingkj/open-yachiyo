@@ -1,6 +1,8 @@
-# open-yachiyo
+# open-yachiyo (fork)
 
 ![open-yachiyo cover](assets/readme-cover.png)
+
+> **Fork 自** [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) | 版本：`0.1.2-fork.wuming`
 
 AI Native 的 **Agentic 桌面宠物** 运行时，核心是**可控 ReAct 循环**。
 
@@ -213,8 +215,39 @@ CI 配置在 GitHub Actions：`.github/workflows/ci.yml`。
 
 ## 贡献者
 
-- [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer
-- [wkf16](https://github.com/wkf16) — Maintainer
+- [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer（上游）
+- [wkf16](https://github.com/wkf16) — Maintainer（上游）
+
+---
+
+## Fork 说明
+
+本仓库是基于 [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) 的个人 fork。
+
+### 与上游的主要区别
+
+| 功能 | 上游 | 本 Fork |
+|---|---|---|
+| TTS 架构 | 硬编码 provider 逻辑 | 抽象 `TtsProviderBase` + 工厂模式，可插拔 |
+| TTS 提供商 | 仅 DashScope | DashScope、GPT-SoVITS、Edge TTS、Windows SAPI |
+| 空闲闲聊 | 无 | 主动闲聊模块，可配置触发时机、话题池、定时问候 |
+| 配置界面 | `config.html`（v1） | 新增 `config-v2.html`，多 tab 编辑器，idle-chatter 表单面板，Agent 对话 |
+| 语音配置 | 内联在 providers.yaml | 独立 `config/voice-policy.yaml` |
+| GPT-SoVITS | 无 | 完整 GPT-SoVITS TTS provider，支持 realtime 和 non-streaming 模式 |
+
+### 最近更新（Fork）
+
+- **TTS provider 抽象化** — 将硬编码 TTS 逻辑提取为 `TtsProviderBase` + 工厂模式，新增 GPT-SoVITS / Edge TTS / Windows SAPI 提供商
+- **空闲闲聊模块** — `IdleChatter` 类，支持可配置的空闲阈值、冷却、随机抖动、速率限制、定时问候和话题池
+- **Config v2 配置界面** — 多 tab 配置编辑器，idle-chatter 可视化表单，provider 快捷面板
+- **语音策略分离** — 将语音/TTS 配置拆分为独立的 `voice-policy.yaml`
+
+### 上游同步
+
+```
+上游仓库: https://github.com/sdyzjx/open-yachiyo.git
+Fork 版本: 0.1.2-fork.wuming
+```
 
 ---
 

@@ -1,6 +1,8 @@
-# open-yachiyo
+# open-yachiyo (fork)
 
 ![open-yachiyo cover](assets/readme-cover.png)
+
+> **Fork of** [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) | Version: `0.1.2-fork.wuming`
 
 AI Native runtime for an **Agentic desktop pet**, with a **controllable ReAct loop**.
 
@@ -215,8 +217,39 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Contributors
 
-- [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer
-- [wkf16](https://github.com/wkf16) — Maintainer
+- [sdyzjx](https://github.com/sdyzjx) — Creator & Maintainer (upstream)
+- [wkf16](https://github.com/wkf16) — Maintainer (upstream)
+
+---
+
+## Fork Info
+
+This is a personal fork based on [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo).
+
+### Differences from Upstream
+
+| Feature | Upstream | This Fork |
+|---|---|---|
+| TTS Architecture | Hardcoded provider logic | Abstracted `TtsProviderBase` + factory pattern, pluggable providers |
+| TTS Providers | DashScope only | DashScope, GPT-SoVITS, Edge TTS, Windows SAPI |
+| Idle Chatter | N/A | Proactive idle chat with configurable timing, topics, and time-based greetings |
+| Config UI | `config.html` (v1) | Added `config-v2.html` with tabbed editor, idle-chatter form panel, and Agent chat |
+| Voice Config | Inline in providers.yaml | Separated `config/voice-policy.yaml` |
+| GPT-SoVITS | N/A | Full GPT-SoVITS TTS provider with realtime and non-streaming modes |
+
+### Recent Updates (Fork)
+
+- **TTS provider abstraction** — extracted hardcoded TTS logic into `TtsProviderBase` with factory, added GPT-SoVITS / Edge TTS / Windows SAPI providers
+- **Idle Chatter module** — `IdleChatter` class with configurable idle threshold, cooldown, jitter, rate limiting, time-based greetings, and topic pool
+- **Config v2 UI** — tabbed configuration editor with visual form for idle-chatter settings and provider quick-panel
+- **Voice policy separation** — split voice/TTS configuration into `voice-policy.yaml`
+
+### Upstream Sync
+
+```
+upstream: https://github.com/sdyzjx/open-yachiyo.git
+fork version: 0.1.2-fork.wuming
+```
 
 ---
 
