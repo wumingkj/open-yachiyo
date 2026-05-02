@@ -50,8 +50,9 @@
         <label>Display Name <input id="ollamaDisplayName" value="Ollama Local" /></label>
         <label>Base URL <input id="ollamaBaseUrl" value="http://localhost:11434/v1" /></label>
         <label>Model <input id="ollamaModel" value="qwen2.5:7b" /></label>
+        <label>API Key <input id="ollamaApiKey" value="ollama" placeholder="默认 ollama" /></label>
         <label>Timeout (ms) <input id="ollamaTimeoutMs" type="number" value="60000" /></label>
-        <span class="hint" style="grid-column: 1/-1">Ollama 无需 API Key，类型将自动设为 qwen35。</span>
+        <span class="hint" style="grid-column: 1/-1">Ollama 本地无需真实 API Key，填 "ollama" 即可。</span>
       </div>
 
       <div class="actions">
@@ -70,6 +71,19 @@
         <label class="radio-row"><input type="radio" name="ttsType" value="tts_windows" /> Windows SAPI (离线，无需网络)</label>
       </fieldset>
 
+      <!-- Shared: built-in reference audio files -->
+      <div class="reference-audio panel-soft">
+        <div class="reference-audio-head">
+          <strong>内置参考音频</strong>
+          <span class="hint">复制路径用于 GPT-SoVITS Ref Audio Path，或用于 DashScope 声线克隆。</span>
+        </div>
+        <div id="referenceAudioFileList">加载中...</div>
+        <div class="reference-audio-path" id="referenceAudioDir">加载中...</div>
+        <div class="actions compact">
+          <button id="openReferenceAudioDirBtn" class="btn" type="button">打开所在目录</button>
+        </div>
+      </div>
+
       <!-- DashScope TTS -->
       <div id="ttsDashscopeFields" class="tts-fields">
         <div class="grid">
@@ -83,19 +97,6 @@
           <label class="radio-row"><input type="radio" name="dashscopeMode" value="normal" checked /> 普通 tts-vc</label>
           <label class="radio-row"><input type="radio" name="dashscopeMode" value="realtime" /> 实时 tts-vc-realtime</label>
         </fieldset>
-        <div class="reference-audio panel-soft">
-          <div class="reference-audio-head">
-            <strong>推荐参考音频</strong>
-            <span class="hint">安装包已内置，建议直接使用。</span>
-          </div>
-          <div class="reference-audio-path" id="referenceAudioPath">加载中...</div>
-          <div class="actions compact">
-            <button id="openReferenceAudioDirBtn" class="btn" type="button">打开所在目录</button>
-            <button id="copyReferenceAudioPathBtn" class="btn" type="button">复制路径</button>
-            <a id="referenceAudioDownloadLink" class="btn" href="#" download>下载音频</a>
-            <a id="referenceAudioPreviewLink" class="btn" href="#" target="_blank" rel="noreferrer">试听</a>
-          </div>
-        </div>
         <div class="grid">
           <label>Preferred Name <input id="voicePreferredName" value="yachiyo" /></label>
           <label>手动 Voice ID（可选）<input id="voiceManualId" placeholder="可跳过克隆直接填写" /></label>

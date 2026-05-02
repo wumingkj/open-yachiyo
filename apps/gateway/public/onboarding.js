@@ -27,6 +27,7 @@ const el = {
   ollamaDisplayName: document.getElementById('ollamaDisplayName'),
   ollamaBaseUrl: document.getElementById('ollamaBaseUrl'),
   ollamaModel: document.getElementById('ollamaModel'),
+  ollamaApiKey: document.getElementById('ollamaApiKey'),
   ollamaTimeoutMs: document.getElementById('ollamaTimeoutMs'),
   saveProviderBtn: document.getElementById('saveProviderBtn'),
 
@@ -44,11 +45,9 @@ const el = {
   voicePreferredName: document.getElementById('voicePreferredName'),
   voiceManualId: document.getElementById('voiceManualId'),
   voiceAudioFile: document.getElementById('voiceAudioFile'),
-  referenceAudioPath: document.getElementById('referenceAudioPath'),
+  referenceAudioFileList: document.getElementById('referenceAudioFileList'),
+  referenceAudioDir: document.getElementById('referenceAudioDir'),
   openReferenceAudioDirBtn: document.getElementById('openReferenceAudioDirBtn'),
-  copyReferenceAudioPathBtn: document.getElementById('copyReferenceAudioPathBtn'),
-  referenceAudioDownloadLink: document.getElementById('referenceAudioDownloadLink'),
-  referenceAudioPreviewLink: document.getElementById('referenceAudioPreviewLink'),
   dashscopeCloneBtn: document.getElementById('dashscopeCloneBtn'),
   dashscopeSaveManualBtn: document.getElementById('dashscopeSaveManualBtn'),
 
@@ -96,7 +95,6 @@ const el = {
 /* ------------------------------------------------------------------ */
 
 const state = {
-  referenceAudioUserPath: '',
   referenceAudioUserDir: '',
   forceOpen: new URLSearchParams(window.location.search).get('force') === '1'
 };
@@ -205,8 +203,8 @@ async function saveProvider() {
             display_name: el.ollamaDisplayName.value.trim(),
             base_url: el.ollamaBaseUrl.value.trim(),
             model: el.ollamaModel.value.trim(),
-            timeout_ms: Number(el.ollamaTimeoutMs.value) || 60000,
-            api_key_env: 'ollama'
+            api_key: el.ollamaApiKey.value.trim() || 'ollama',
+            timeout_ms: Number(el.ollamaTimeoutMs.value) || 60000
           }
         : {
             key: el.llmKey.value.trim(),
@@ -419,21 +417,44 @@ async function initReferenceAudioInfo() {
   try {
     const response = await fetchJson('/api/onboarding/reference-audio');
     const data = response?.data || {};
-    state.referenceAudioUserPath = String(data.user_path || '');
     state.referenceAudioUserDir = String(data.user_dir || '');
+    el.referenceAudioDir.textContent = state.referenceAudioUserDir || '未找到';
 
-    const pathText = state.referenceAudioUserPath || '未找到';
-    el.referenceAudioPath.textContent = pathText;
-
-    // Use first file (preferably the 18s one) for download/preview
+    // Render file list
     const files = Array.isArray(data.files) ? data.files : [];
-    const primary = files.find(f => f.name.includes('18s')) || files[0];
-    if (primary?.url) {
-      el.referenceAudioDownloadLink.href = primary.url;
-      el.referenceAudioPreviewLink.href = primary.url;
+    if (files.length === 0) {
+      el.referenceAudioFileList.innerHTML = '<span class="hint">未找到参考音频文件</span>';
+      return;
     }
+    el.referenceAudioFileList.innerHTML = files.map(f => `
+      <div class="ref-audio-row">
+        <span class="ref-audio-name">${escapeHtml(f.name)}</span>
+        <span class="ref-audio-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</span>
+        <button class="btn ref-audio-copy" data-path="${escapeHtml(f.path)}">复制路径</button>
+      </div>
+    `).join('');
+
+    // Bind copy buttons
+    el.referenceAudioFileList.querySelectorAll('.ref-audio-copy').forEach(btn => {
+      btn.addEventListener('click', () => copyToClipboard(btn.dataset.path));
+    });
   } catch (err) {
-    el.referenceAudioPath.textContent = `获取失败: ${err.message || String(err)}`;
+    el.referenceAudioFileList.innerHTML = `<span class="hint">获取失败: ${escapeHtml(err.message || String(err))}</span>`;
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = String(str || '');
+  return div.innerHTML;
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus('路径已复制: ' + text);
+  } catch {
+    setStatus('复制失败', true);
   }
 }
 
@@ -445,15 +466,6 @@ async function openReferenceAudioDir() {
   const result = await openPath(target);
   if (!result?.ok) { setStatus(`打开目录失败: ${result?.error || 'unknown error'}`, true); return; }
   setStatus('已打开参考音频目录');
-}
-
-async function copyReferenceAudioPath() {
-  const target = state.referenceAudioUserPath || el.referenceAudioPath.textContent || '';
-  if (!target) { setStatus('没有可复制的路径', true); return; }
-  try {
-    await navigator.clipboard.writeText(target);
-    setStatus('参考音频路径已复制');
-  } catch { setStatus('复制失败，请手动复制', true); }
 }
 
 /* ------------------------------------------------------------------ */
@@ -481,7 +493,6 @@ async function init() {
   el.dashscopeCloneBtn.addEventListener('click', saveDashscopeClone);
   el.dashscopeSaveManualBtn.addEventListener('click', saveDashscopeManual);
   el.openReferenceAudioDirBtn.addEventListener('click', openReferenceAudioDir);
-  el.copyReferenceAudioPathBtn.addEventListener('click', copyReferenceAudioPath);
 
   // Step 2 — other TTS providers
   el.gptSovitsSaveBtn.addEventListener('click', saveGptSovits);

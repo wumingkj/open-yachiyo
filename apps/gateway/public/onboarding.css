@@ -159,6 +159,41 @@ label {
   overflow-wrap: anywhere;
 }
 
+#referenceAudioFileList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ref-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--panel-solid) 50%, transparent);
+}
+
+.ref-audio-row .ref-audio-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.ref-audio-row .ref-audio-path {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-audio-row .ref-audio-copy {
+  flex-shrink: 0;
+}
+
 .status-bar {
   display: flex;
   align-items: center;

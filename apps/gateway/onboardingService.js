@@ -137,7 +137,7 @@ function buildLlmProviderPayload(providerInput = {}, providerType) {
         base_url: String(providerInput.base_url || 'http://localhost:11434/v1').trim(),
         model: String(providerInput.model || 'qwen2.5:7b').trim(),
         timeout_ms: Math.round(parsePositiveNumber(providerInput.timeout_ms, DEFAULT_TIMEOUT_MS)),
-        api_key_env: String(providerInput.api_key_env || 'ollama').trim()
+        api_key: String(providerInput.api_key || 'ollama').trim()
       }
     };
   }
