@@ -15,6 +15,7 @@ providers:
     base_url: http://127.0.0.1:9880
     tts_voice: default
     tts_language: auto
+    voice_output_language: jp
     timeout_sec: 120
     use_model_lang: false
     endpoint: /tts
@@ -56,6 +57,7 @@ providers:
   # edge_tts:
   #   type: tts_edge
   #   tts_voice: zh-CN-XiaoxiaoNeural
+  #   voice_output_language: jp
   #   rate: "+0%"
   #   pitch: "+0Hz"
   #   volume: "+0%"
@@ -65,5 +67,6 @@ providers:
   # windows_tts:
   #   type: tts_windows
   #   tts_voice: Microsoft Huihui Desktop
+  #   voice_output_language: zh
   #   rate: 0
   #   volume: 100

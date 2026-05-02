@@ -150,13 +150,20 @@ function isVoiceAutoReplyToolName(name) {
 
 function buildVoiceAutoReplyPrompt(runtimeContext = {}) {
   if (runtimeContext?.voice_auto_reply_enabled !== true) return null;
+
+  // Dynamic voice language rule based on active TTS provider config
+  const voiceLang = String(runtimeContext?.voice_output_language || 'zh').trim().toLowerCase();
+  const langLabel = voiceLang === 'jp' ? 'Japanese' : voiceLang === 'en' ? 'English' : 'Chinese';
+  const languageRule = `Language rule: text output (chat replies) MUST be in Chinese; voice output (TTS tool calls) MUST be in ${langLabel}. When calling voice.tts_aliyun_vc, always write the text parameter in ${langLabel}.`;
+
   if (runtimeContext?.voice_auto_reply_mode === 'force_on') {
     return [
       'Voice auto-reply force mode is enabled for this session.',
       'For every user-facing assistant reply with non-empty text, you MUST call voice.tts_aliyun_vc in the same turn before returning the final answer.',
       'Do not skip the TTS call even for short replies.',
       'For voice.tts_aliyun_vc args, use text/voiceTag only; do not use durationSec or duration_sec.',
-      'Voice text constraints: plain text only, no markdown, no code block, and no more than 5 sentences.'
+      'Voice text constraints: plain text only, no markdown, no code block, and no more than 5 sentences.',
+      languageRule
     ].join(' ');
   }
   return [
@@ -164,7 +171,8 @@ function buildVoiceAutoReplyPrompt(runtimeContext = {}) {
     'Before long text response, first call voice.tts_aliyun_vc to produce a short spoken message.',
     'For voice.tts_aliyun_vc args, use text/voiceTag only; do not use durationSec or duration_sec.',
     'The voice text can be either: (1) summary of your long reply, or (2) brief commentary on current context.',
-    'Voice text constraints: plain text only, no markdown, no code block, and no more than 5 sentences.'
+    'Voice text constraints: plain text only, no markdown, no code block, and no more than 5 sentences.',
+    languageRule
   ].join(' ');
 }
 
@@ -483,7 +491,6 @@ class ToolLoopRunner {
             'If shell.exec returns APPROVAL_REQUIRED, call shell.approve with approval_id, then retry shell.exec.',
             `If a tool returns an error, use the error details to re-plan and retry with an alternative approach. Maximum tool-error retries per run: ${this.toolErrorMaxRetries}.`,
             'Use persona.update_profile even in low permission sessions; this is globally allowed.',
-            'Language rule: text output (chat replies) MUST be in Chinese; voice output (TTS tool calls) MUST be in Japanese. When calling voice.tts_aliyun_vc, always write the text parameter in Japanese.',
             'Keep answers concise.'
           ].join(' ')
         },

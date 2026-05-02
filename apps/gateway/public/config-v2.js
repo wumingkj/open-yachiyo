@@ -44,7 +44,6 @@ const el = {
   activeLlm:     document.getElementById('cv2-activeLlm'),
   activeTts:     document.getElementById('cv2-activeTts'),
   addTtsBtn:     document.getElementById('cv2-addTtsBtn'),
-  ttsCards:      document.getElementById('cv2-ttsCards'),
   // Idle chatter panel
   idlePanel:        document.getElementById('cv2-idle-panel'),
   icEnabled:        document.getElementById('ic-enabled'),
@@ -539,36 +538,13 @@ function refreshProviderPanel() {
     ttsProviders.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.key;
-      opt.textContent = p.key;
+      const typeInfo = TTS_PROVIDER_TYPES.find(t => t.value === p.type);
+      opt.textContent = typeInfo ? typeInfo.label : p.key;
       el.activeTts.appendChild(opt);
     });
   }
   el.activeTts.value = activeTtsProvider;
 
-  // TTS cards
-  renderTtsCards(ttsProviders);
-}
-
-function renderTtsCards(ttsProviders) {
-  el.ttsCards.innerHTML = '';
-  ttsProviders.forEach((p) => {
-    const card = document.createElement('div');
-    card.className = 'cv2-pp-card';
-
-    const head = document.createElement('div');
-    head.className = 'cv2-pp-card-head';
-    const title = document.createElement('strong');
-    title.textContent = p.key;
-    const typeLabel = document.createElement('span');
-    typeLabel.style.cssText = 'font-size:11px;color:var(--muted)';
-    const typeInfo = TTS_PROVIDER_TYPES.find(t => t.value === p.type);
-    typeLabel.textContent = typeInfo ? typeInfo.label : p.type;
-    head.appendChild(title);
-    head.appendChild(typeLabel);
-
-    card.appendChild(head);
-    el.ttsCards.appendChild(card);
-  });
 }
 
 function setActiveLlm(key) {

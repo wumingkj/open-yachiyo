@@ -2936,14 +2936,29 @@ async function startDesktopSuite({
 
   let ttsClient = null;
   let realtimeTtsClient = null;
-  try {
-    ttsClient = TtsProviderFactory.createNonStreaming({ fetchImpl: globalThis.fetch });
-    realtimeTtsClient = TtsProviderFactory.createStreaming();
-  } catch (ttsInitErr) {
-    logger.warn?.('[desktop-live2d] TTS provider init failed — voice synthesis will be unavailable', {
-      error: ttsInitErr?.message || String(ttsInitErr)
-    });
+
+  /** (Re-)initialize TTS provider(s) from the current providers.yaml config. */
+  function reloadTtsProviders() {
+    try {
+      ttsClient = TtsProviderFactory.createNonStreaming({ fetchImpl: globalThis.fetch });
+      logger.info?.('[desktop-live2d] non-streaming TTS provider reloaded');
+    } catch (ttsInitErr) {
+      ttsClient = null;
+      logger.warn?.('[desktop-live2d] non-streaming TTS provider init failed', {
+        error: ttsInitErr?.message || String(ttsInitErr)
+      });
+    }
+    try {
+      realtimeTtsClient = TtsProviderFactory.createStreaming();
+      logger.info?.('[desktop-live2d] streaming TTS provider reloaded');
+    } catch (ttsInitErr) {
+      realtimeTtsClient = null;
+      logger.warn?.('[desktop-live2d] streaming TTS provider init failed — realtime voice unavailable', {
+        error: ttsInitErr?.message || String(ttsInitErr)
+      });
+    }
   }
+  reloadTtsProviders();
   const recentVoiceRequestIds = new Map();
   const VOICE_REQUEST_DEDUP_TTL_MS = 120000;
 
@@ -3053,6 +3068,10 @@ async function startDesktopSuite({
             emitDebug: emitDesktopDebug,
             logger
           });
+        } else if (eventName === 'config.providers.updated') {
+          // Hot-swap TTS providers when providers.yaml is saved
+          reloadTtsProviders();
+          logger.info?.('[desktop-live2d] TTS providers hot-reloaded due to config.providers.updated event');
         } else if (eventName.startsWith('ui.') || eventName.startsWith('client.') || eventName.startsWith('voice.')) {
           activeBridge?.invoke({
             method: 'server_event_forward',

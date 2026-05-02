@@ -777,6 +777,8 @@ app.put('/api/config/providers/raw', (req, res) => {
 
   try {
     llmManager.saveYaml(yaml);
+    // Notify desktop to hot-reload TTS provider
+    bus.publish('config.providers.updated', { source: 'config-v2' });
     res.json({ ok: true, data: llmManager.getConfigSummary() });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message || String(err) });
@@ -1298,6 +1300,17 @@ async function enqueueRpc(ws, rpcPayload, mode) {
       const workspace = await workspaceManager.getWorkspaceInfo(sessionId);
       const normalizedWorkspace = normalizeWorkspaceSettings(workspace);
 
+      // Read active TTS provider's voice_output_language for dynamic prompt
+      let voiceOutputLanguage = 'zh';
+      try {
+        const providerConfig = providerStore.load();
+        const activeTtsKey = providerConfig?.active_tts_provider;
+        const activeTtsProvider = activeTtsKey && providerConfig?.providers?.[activeTtsKey];
+        if (activeTtsProvider && typeof activeTtsProvider.voice_output_language === 'string') {
+          voiceOutputLanguage = activeTtsProvider.voice_output_language.trim().toLowerCase();
+        }
+      } catch { /* ignore — use default 'zh' */ }
+
       await sessionStore.updateSessionSettings(sessionId, {
         permission_level: permissionLevel,
         workspace: normalizedWorkspace,
@@ -1309,7 +1322,8 @@ async function enqueueRpc(ws, rpcPayload, mode) {
         permission_level: permissionLevel,
         workspace_root: normalizedWorkspace.root_dir,
         voice_auto_reply_enabled: voiceAutoReplyEnabled,
-        voice_auto_reply_mode: voiceAutoReplyMode
+        voice_auto_reply_mode: voiceAutoReplyMode,
+        voice_output_language: voiceOutputLanguage
       };
     },
     transcribeAudio: async ({ session_id: sessionId, input_audio: inputAudio, runtime_context: runtimeContext }) => {
@@ -1600,7 +1614,7 @@ wss.on('connection', (ws) => {
   });
 
   const onGlobalEvent = (topic, payload) => {
-    if (typeof topic === 'string' && (topic.startsWith('ui.') || topic.startsWith('client.') || topic.startsWith('voice.'))) {
+    if (typeof topic === 'string' && (topic.startsWith('ui.') || topic.startsWith('client.') || topic.startsWith('voice.') || topic.startsWith('config.'))) {
       const rpcPayload = {
         jsonrpc: '2.0',
         method: 'runtime.event',
