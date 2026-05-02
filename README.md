@@ -2,7 +2,7 @@
 
 ![open-yachiyo cover](assets/readme-cover.png)
 
-> **Fork of** [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) | Version: `0.1.2-fork.wuming`
+> **Fork of** [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) | Version: `0.1.3-fork.wuming`
 
 AI Native runtime for an **Agentic desktop pet**, with a **controllable ReAct loop**.
 
