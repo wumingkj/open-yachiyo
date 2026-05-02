@@ -49,17 +49,20 @@ const {
   markOnboardingStep,
   markOnboardingCompleted,
   saveLlmProvider,
+  saveTtsProvider,
   saveTtsProviderFromVoiceClone,
   saveOnboardingPreferences,
   DEFAULT_LLM_BASE_URL,
   DEFAULT_TTS_BASE_URL,
   DEFAULT_NORMAL_MODEL,
-  DEFAULT_REALTIME_MODEL
+  DEFAULT_REALTIME_MODEL,
+  TTS_DEFAULT_VOICE_LANG
 } = require('./onboardingService');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use('/assets', express.static(path.join(__dirname, '..', '..', 'assets')));
+app.use('/assets/voice', express.static(path.join(__dirname, '..', '..', 'voices')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const bus = new RuntimeEventBus();
@@ -96,16 +99,8 @@ const idleChatterPath = process.env.IDLE_CHATTER_CONFIG_PATH
   || require('node:path').resolve(runtimePaths.configDir, 'idle-chatter.yaml');
 const desktopLive2dConfigPath = process.env.DESKTOP_LIVE2D_CONFIG_PATH
   || require('node:path').resolve(runtimePaths.configDir, 'desktop-live2d.json');
-const bundledReferenceAudioPath = path.resolve(
-  __dirname,
-  '..',
-  '..',
-  'assets',
-  'reference',
-  'yachiyo_voice_ref_clone_18s.mp3'
-);
+const bundledReferenceAudioDir = path.resolve(__dirname, '..', '..', 'voices');
 const userReferenceAudioDir = path.resolve(runtimePaths.dataDir, 'reference-audio');
-const userReferenceAudioPath = path.resolve(userReferenceAudioDir, 'yachiyo_voice_ref_clone_18s.mp3');
 const personaContextBuilder = new PersonaContextBuilder({
   workspaceDir: process.cwd(),
   profileStore: personaProfileStore,
@@ -198,30 +193,42 @@ function parsePositiveIntEnv(name, fallback = 1) {
 }
 
 async function ensureReferenceAudioExported() {
-  const sourcePath = bundledReferenceAudioPath;
-  await fs.access(sourcePath);
   await fs.mkdir(userReferenceAudioDir, { recursive: true });
 
-  let shouldCopy = true;
-  try {
-    const [srcStat, dstStat] = await Promise.all([
-      fs.stat(sourcePath),
-      fs.stat(userReferenceAudioPath)
-    ]);
-    shouldCopy = srcStat.size !== dstStat.size || srcStat.mtimeMs > dstStat.mtimeMs;
-  } catch {
-    shouldCopy = true;
+  // Copy all files from bundled voices/ directory to user reference-audio/
+  const entries = await fs.readdir(bundledReferenceAudioDir);
+  const copiedFiles = [];
+  for (const entry of entries) {
+    if (entry.startsWith('.')) continue;
+    const srcPath = path.join(bundledReferenceAudioDir, entry);
+    const stat = await fs.stat(srcPath).catch(() => null);
+    if (!stat || !stat.isFile()) continue;
+    const dstPath = path.join(userReferenceAudioDir, entry);
+    let shouldCopy = true;
+    try {
+      const dstStat = await fs.stat(dstPath);
+      shouldCopy = stat.size !== dstStat.size || stat.mtimeMs > dstStat.mtimeMs;
+    } catch { shouldCopy = true; }
+    if (shouldCopy) {
+      await fs.copyFile(srcPath, dstPath);
+    }
+    copiedFiles.push({ name: entry, path: dstPath });
   }
 
-  if (shouldCopy) {
-    await fs.copyFile(sourcePath, userReferenceAudioPath);
-  }
+  // Primary reference audio for DashScope cloning (18s)
+  const primaryFile = copiedFiles.find(f => f.name.includes('18s'));
+  const userReferenceAudioPath = primaryFile
+    ? primaryFile.path
+    : (copiedFiles[0]?.path || userReferenceAudioDir);
 
   return {
-    bundled_path: sourcePath,
+    files: copiedFiles.map(f => ({
+      name: f.name,
+      url: `/assets/voice/${f.name}`,
+      path: f.path
+    })),
     user_path: userReferenceAudioPath,
-    user_dir: userReferenceAudioDir,
-    bundled_url: '/assets/reference/yachiyo_voice_ref_clone_18s.mp3'
+    user_dir: userReferenceAudioDir
   };
 }
 
@@ -448,6 +455,7 @@ app.get('/api/onboarding/reference-audio', async (_, res) => {
 app.post('/api/onboarding/provider/save', async (req, res) => {
   const provider = req.body?.provider;
   const activeProvider = req.body?.active_provider;
+  const providerType = String(req.body?.provider_type || '').trim();
   if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
     res.status(400).json({ ok: false, error: 'body.provider must be an object' });
     return;
@@ -457,7 +465,8 @@ app.post('/api/onboarding/provider/save', async (req, res) => {
     const nextConfig = saveLlmProvider({
       providerStore,
       providerInput: provider,
-      activeProvider
+      activeProvider,
+      providerType: providerType || undefined
     });
     await markOnboardingStep('voice');
     res.json({ ok: true, data: nextConfig });
@@ -527,6 +536,98 @@ app.post('/api/onboarding/voice/clone', async (req, res) => {
       code,
       error: err.message || String(err),
       details: err.details || null
+    });
+  }
+});
+
+app.post('/api/onboarding/tts/save', async (req, res) => {
+  const payload = req.body || {};
+  const ttsType = String(payload.tts_type || '').trim().toLowerCase();
+  const providerKey = String(payload.provider_key || '').trim();
+
+  const validTypes = ['tts_dashscope', 'tts_gpt_sovits', 'tts_edge', 'tts_windows'];
+  if (!validTypes.includes(ttsType)) {
+    res.status(400).json({ ok: false, code: 'ONBOARDING_CONFIG_SAVE_FAILED', error: `tts_type must be one of: ${validTypes.join(', ')}` });
+    return;
+  }
+  if (!providerKey) {
+    res.status(400).json({ ok: false, code: 'ONBOARDING_CONFIG_SAVE_FAILED', error: 'provider_key is required' });
+    return;
+  }
+
+  // DashScope with clone still needs voice clone service
+  if (ttsType === 'tts_dashscope' && payload.audio_data_url) {
+    const apiKey = String(payload.api_key || '').trim();
+    const apiKeyEnv = String(payload.api_key_env || '').trim();
+    const resolvedApiKey = apiKey || (apiKeyEnv ? process.env[apiKeyEnv] : '');
+    const targetMode = String(payload.target_mode || 'normal').trim().toLowerCase() === 'realtime'
+      ? 'realtime'
+      : 'normal';
+
+    if (!resolvedApiKey) {
+      res.status(400).json({ ok: false, code: 'ONBOARDING_DASHSCOPE_AUTH_FAILED', error: 'api_key is required for voice clone' });
+      return;
+    }
+
+    try {
+      const cloneResult = await cloneVoice({
+        apiKey: resolvedApiKey,
+        audioDataUrl: payload.audio_data_url,
+        preferredName: String(payload.preferred_name || '').trim(),
+        baseUrl: String(payload.base_url || DEFAULT_TTS_BASE_URL).trim(),
+        targetMode
+      });
+      const providersConfig = saveTtsProviderFromVoiceClone({
+        providerStore,
+        apiKey,
+        apiKeyEnv,
+        ttsBaseUrl: String(payload.base_url || DEFAULT_TTS_BASE_URL).trim(),
+        targetMode,
+        voiceId: cloneResult.voiceId
+      });
+      await markOnboardingStep('preferences');
+      res.json({
+        ok: true,
+        data: {
+          tts_type: ttsType,
+          provider_key: providerKey,
+          voice_id: cloneResult.voiceId,
+          providers: providersConfig
+        }
+      });
+    } catch (err) {
+      const code = err.code || 'ONBOARDING_DASHSCOPE_PROVIDER_DOWN';
+      const status = code === 'ONBOARDING_DASHSCOPE_AUTH_FAILED' || code === 'ONBOARDING_AUDIO_INVALID' ? 400 : 500;
+      res.status(status).json({
+        ok: false, code, error: err.message || String(err), details: err.details || null
+      });
+    }
+    return;
+  }
+
+  // Generic save for any TTS provider (or DashScope with manual voice_id)
+  try {
+    const providersConfig = saveTtsProvider({
+      providerStore,
+      ttsType,
+      providerKey,
+      input: payload
+    });
+    await markOnboardingStep('preferences');
+    res.json({
+      ok: true,
+      data: {
+        tts_type: ttsType,
+        provider_key: providerKey,
+        providers: providersConfig
+      }
+    });
+  } catch (err) {
+    const status = err instanceof OnboardingError ? 400 : 500;
+    res.status(status).json({
+      ok: false,
+      code: err.code || 'ONBOARDING_CONFIG_SAVE_FAILED',
+      error: err.message || String(err)
     });
   }
 });

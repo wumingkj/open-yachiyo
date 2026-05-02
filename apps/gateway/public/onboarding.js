@@ -1,5 +1,9 @@
 ﻿const THEME_KEY = 'yachiyo_theme_v1';
 
+/* ------------------------------------------------------------------ */
+/*  Element references                                                */
+/* ------------------------------------------------------------------ */
+
 const el = {
   step1: document.getElementById('step1'),
   step2: document.getElementById('step2'),
@@ -8,15 +12,35 @@ const el = {
   stepMark2: document.getElementById('stepMark2'),
   stepMark3: document.getElementById('stepMark3'),
   statusText: document.getElementById('statusText'),
+
+  // Step 1 — LLM
+  llmOpenaiFields: document.getElementById('llmOpenaiFields'),
+  llmOllamaFields: document.getElementById('llmOllamaFields'),
   llmKey: document.getElementById('llmKey'),
   llmDisplayName: document.getElementById('llmDisplayName'),
   llmBaseUrl: document.getElementById('llmBaseUrl'),
   llmModel: document.getElementById('llmModel'),
   llmApiKey: document.getElementById('llmApiKey'),
+  llmApiKeyEnv: document.getElementById('llmApiKeyEnv'),
   llmTimeoutMs: document.getElementById('llmTimeoutMs'),
+  ollamaKey: document.getElementById('ollamaKey'),
+  ollamaDisplayName: document.getElementById('ollamaDisplayName'),
+  ollamaBaseUrl: document.getElementById('ollamaBaseUrl'),
+  ollamaModel: document.getElementById('ollamaModel'),
+  ollamaTimeoutMs: document.getElementById('ollamaTimeoutMs'),
   saveProviderBtn: document.getElementById('saveProviderBtn'),
-  ttsApiKey: document.getElementById('ttsApiKey'),
-  ttsBaseUrl: document.getElementById('ttsBaseUrl'),
+
+  // Step 2 — TTS type toggle
+  ttsDashscopeFields: document.getElementById('ttsDashscopeFields'),
+  ttsGptSovitsFields: document.getElementById('ttsGptSovitsFields'),
+  ttsEdgeFields: document.getElementById('ttsEdgeFields'),
+  ttsWindowsFields: document.getElementById('ttsWindowsFields'),
+
+  // DashScope
+  ttsDashscopeKey: document.getElementById('ttsDashscopeKey'),
+  ttsDashscopeApiKey: document.getElementById('ttsDashscopeApiKey'),
+  ttsDashscopeApiKeyEnv: document.getElementById('ttsDashscopeApiKeyEnv'),
+  ttsDashscopeBaseUrl: document.getElementById('ttsDashscopeBaseUrl'),
   voicePreferredName: document.getElementById('voicePreferredName'),
   voiceManualId: document.getElementById('voiceManualId'),
   voiceAudioFile: document.getElementById('voiceAudioFile'),
@@ -25,17 +49,41 @@ const el = {
   copyReferenceAudioPathBtn: document.getElementById('copyReferenceAudioPathBtn'),
   referenceAudioDownloadLink: document.getElementById('referenceAudioDownloadLink'),
   referenceAudioPreviewLink: document.getElementById('referenceAudioPreviewLink'),
-  voiceCloneBtn: document.getElementById('voiceCloneBtn'),
-  voiceSaveManualBtn: document.getElementById('voiceSaveManualBtn'),
+  dashscopeCloneBtn: document.getElementById('dashscopeCloneBtn'),
+  dashscopeSaveManualBtn: document.getElementById('dashscopeSaveManualBtn'),
+
+  // GPT-SoVITS
+  ttsGptSovitsKey: document.getElementById('ttsGptSovitsKey'),
+  ttsGptSovitsBaseUrl: document.getElementById('ttsGptSovitsBaseUrl'),
+  ttsGptSovitsVoice: document.getElementById('ttsGptSovitsVoice'),
+  ttsGptSovitsRefAudio: document.getElementById('ttsGptSovitsRefAudio'),
+  ttsGptSovitsTimeout: document.getElementById('ttsGptSovitsTimeout'),
+  gptSovitsSaveBtn: document.getElementById('gptSovitsSaveBtn'),
+
+  // Edge TTS
+  ttsEdgeKey: document.getElementById('ttsEdgeKey'),
+  ttsEdgeVoice: document.getElementById('ttsEdgeVoice'),
+  ttsEdgeRate: document.getElementById('ttsEdgeRate'),
+  ttsEdgePitch: document.getElementById('ttsEdgePitch'),
+  ttsEdgeVolume: document.getElementById('ttsEdgeVolume'),
+  edgeSaveBtn: document.getElementById('edgeSaveBtn'),
+
+  // Windows SAPI
+  ttsWindowsKey: document.getElementById('ttsWindowsKey'),
+  ttsWindowsVoice: document.getElementById('ttsWindowsVoice'),
+  ttsWindowsRate: document.getElementById('ttsWindowsRate'),
+  ttsWindowsVolume: document.getElementById('ttsWindowsVolume'),
+  windowsSaveBtn: document.getElementById('windowsSaveBtn'),
+
   backToStep1Btn: document.getElementById('backToStep1Btn'),
+
+  // Step 3 — Preferences
   prefAutoReplyEnabled: document.getElementById('prefAutoReplyEnabled'),
   prefMaxChars: document.getElementById('prefMaxChars'),
   prefCooldownSec: document.getElementById('prefCooldownSec'),
   prefMaxTtsPerMinute: document.getElementById('prefMaxTtsPerMinute'),
   prefPersonaMode: document.getElementById('prefPersonaMode'),
   prefMaxContextChars: document.getElementById('prefMaxContextChars'),
-  prefSkillsWorkspace: document.getElementById('prefSkillsWorkspace'),
-  prefSkillsGlobal: document.getElementById('prefSkillsGlobal'),
   prefDesktopVoiceTransport: document.getElementById('prefDesktopVoiceTransport'),
   savePrefsBtn: document.getElementById('savePrefsBtn'),
   backToStep2Btn: document.getElementById('backToStep2Btn'),
@@ -43,11 +91,19 @@ const el = {
   skipBtn: document.getElementById('skipBtn')
 };
 
+/* ------------------------------------------------------------------ */
+/*  State                                                             */
+/* ------------------------------------------------------------------ */
+
 const state = {
   referenceAudioUserPath: '',
   referenceAudioUserDir: '',
   forceOpen: new URLSearchParams(window.location.search).get('force') === '1'
 };
+
+/* ------------------------------------------------------------------ */
+/*  Theme                                                             */
+/* ------------------------------------------------------------------ */
 
 function applyTheme(pref) {
   const resolved = pref === 'auto'
@@ -58,18 +114,15 @@ function applyTheme(pref) {
 
 function initTheme() {
   const saved = localStorage.getItem(THEME_KEY);
-  const preferred = saved || 'auto';
-  applyTheme(preferred);
+  applyTheme(saved || 'auto');
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    const current = localStorage.getItem(THEME_KEY) || 'auto';
-    if (current === 'auto') applyTheme('auto');
+    if ((localStorage.getItem(THEME_KEY) || 'auto') === 'auto') applyTheme('auto');
   });
 }
 
-function getTtsMode() {
-  const checked = document.querySelector('input[name="ttsMode"]:checked');
-  return checked ? checked.value : 'normal';
-}
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
 
 function setStatus(text, isError = false) {
   el.statusText.textContent = text;
@@ -77,16 +130,42 @@ function setStatus(text, isError = false) {
 }
 
 function switchStep(step) {
-  const s1 = step === 1;
-  const s2 = step === 2;
-  const s3 = step === 3;
-
+  const s1 = step === 1, s2 = step === 2, s3 = step === 3;
   el.step1.classList.toggle('hidden', !s1);
   el.step2.classList.toggle('hidden', !s2);
   el.step3.classList.toggle('hidden', !s3);
   el.stepMark1.classList.toggle('active', s1);
   el.stepMark2.classList.toggle('active', s2);
   el.stepMark3.classList.toggle('active', s3);
+}
+
+function switchLlmType() {
+  const isOllama = getLlmType() === 'ollama';
+  el.llmOpenaiFields.classList.toggle('hidden', isOllama);
+  el.llmOllamaFields.classList.toggle('hidden', !isOllama);
+}
+
+function getLlmType() {
+  const checked = document.querySelector('input[name="llmType"]:checked');
+  return checked ? checked.value : 'openai_compatible';
+}
+
+function switchTtsType() {
+  const type = getTtsType();
+  el.ttsDashscopeFields.classList.toggle('hidden', type !== 'tts_dashscope');
+  el.ttsGptSovitsFields.classList.toggle('hidden', type !== 'tts_gpt_sovits');
+  el.ttsEdgeFields.classList.toggle('hidden', type !== 'tts_edge');
+  el.ttsWindowsFields.classList.toggle('hidden', type !== 'tts_windows');
+}
+
+function getTtsType() {
+  const checked = document.querySelector('input[name="ttsType"]:checked');
+  return checked ? checked.value : 'tts_dashscope';
+}
+
+function getDashscopeMode() {
+  const checked = document.querySelector('input[name="dashscopeMode"]:checked');
+  return checked ? checked.value : 'normal';
 }
 
 async function fetchJson(url, options = {}) {
@@ -100,7 +179,7 @@ async function fetchJson(url, options = {}) {
   return data;
 }
 
-async function fileToDataUrl(file) {
+function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
@@ -109,23 +188,40 @@ async function fileToDataUrl(file) {
   });
 }
 
+/* ------------------------------------------------------------------ */
+/*  Step 1: Save LLM Provider                                        */
+/* ------------------------------------------------------------------ */
+
 async function saveProvider() {
   setStatus('正在保存 LLM provider...');
   try {
+    const isOllama = getLlmType() === 'ollama';
+    const body = {
+      provider_type: isOllama ? 'qwen35' : 'openai_compatible',
+      active_provider: isOllama ? el.ollamaKey.value.trim() : el.llmKey.value.trim(),
+      provider: isOllama
+        ? {
+            key: el.ollamaKey.value.trim(),
+            display_name: el.ollamaDisplayName.value.trim(),
+            base_url: el.ollamaBaseUrl.value.trim(),
+            model: el.ollamaModel.value.trim(),
+            timeout_ms: Number(el.ollamaTimeoutMs.value) || 60000,
+            api_key_env: 'ollama'
+          }
+        : {
+            key: el.llmKey.value.trim(),
+            display_name: el.llmDisplayName.value.trim(),
+            base_url: el.llmBaseUrl.value.trim(),
+            model: el.llmModel.value.trim(),
+            api_key: el.llmApiKey.value.trim() || undefined,
+            api_key_env: el.llmApiKeyEnv.value.trim() || undefined,
+            timeout_ms: Number(el.llmTimeoutMs.value) || 60000
+          }
+    };
     await fetchJson('/api/onboarding/provider/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: {
-          key: el.llmKey.value.trim(),
-          display_name: el.llmDisplayName.value.trim(),
-          base_url: el.llmBaseUrl.value.trim(),
-          model: el.llmModel.value.trim(),
-          api_key: el.llmApiKey.value.trim(),
-          timeout_ms: Number(el.llmTimeoutMs.value) || 20000
-        },
-        active_provider: el.llmKey.value.trim()
-      })
+      body: JSON.stringify(body)
     });
     setStatus('LLM provider 已保存');
     switchStep(2);
@@ -134,32 +230,11 @@ async function saveProvider() {
   }
 }
 
-async function saveManualVoiceId() {
-  const voiceId = el.voiceManualId.value.trim();
-  if (!voiceId) {
-    setStatus('请填写 Voice ID', true);
-    return;
-  }
-  setStatus('正在保存手动 Voice ID...');
-  try {
-    await fetchJson('/api/onboarding/voice/save-manual', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        target_mode: getTtsMode(),
-        api_key: el.ttsApiKey.value.trim(),
-        base_url: el.ttsBaseUrl.value.trim(),
-        voice_id: voiceId
-      })
-    });
-    setStatus('Voice ID 已保存');
-    switchStep(3);
-  } catch (err) {
-    setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
-  }
-}
+/* ------------------------------------------------------------------ */
+/*  Step 2: Save TTS Provider                                        */
+/* ------------------------------------------------------------------ */
 
-async function cloneVoice() {
+async function saveDashscopeClone() {
   const file = el.voiceAudioFile.files?.[0];
   if (!file) {
     setStatus('请先选择音频文件', true);
@@ -168,13 +243,16 @@ async function cloneVoice() {
   setStatus('正在克隆声线...');
   try {
     const audioDataUrl = await fileToDataUrl(file);
-    await fetchJson('/api/onboarding/voice/clone', {
+    await fetchJson('/api/onboarding/tts/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        target_mode: getTtsMode(),
-        api_key: el.ttsApiKey.value.trim(),
-        base_url: el.ttsBaseUrl.value.trim(),
+        tts_type: 'tts_dashscope',
+        provider_key: el.ttsDashscopeKey.value.trim(),
+        api_key: el.ttsDashscopeApiKey.value.trim() || undefined,
+        api_key_env: el.ttsDashscopeApiKeyEnv.value.trim() || undefined,
+        base_url: el.ttsDashscopeBaseUrl.value.trim(),
+        target_mode: getDashscopeMode(),
         preferred_name: el.voicePreferredName.value.trim(),
         audio_data_url: audioDataUrl
       })
@@ -185,6 +263,103 @@ async function cloneVoice() {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
   }
 }
+
+async function saveDashscopeManual() {
+  const voiceId = el.voiceManualId.value.trim();
+  if (!voiceId) {
+    setStatus('请填写 Voice ID', true);
+    return;
+  }
+  setStatus('正在保存手动 Voice ID...');
+  try {
+    await fetchJson('/api/onboarding/tts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tts_type: 'tts_dashscope',
+        provider_key: el.ttsDashscopeKey.value.trim(),
+        api_key: el.ttsDashscopeApiKey.value.trim() || undefined,
+        api_key_env: el.ttsDashscopeApiKeyEnv.value.trim() || undefined,
+        base_url: el.ttsDashscopeBaseUrl.value.trim(),
+        target_mode: getDashscopeMode(),
+        voice_id: voiceId
+      })
+    });
+    setStatus('Voice ID 已保存');
+    switchStep(3);
+  } catch (err) {
+    setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
+  }
+}
+
+async function saveGptSovits() {
+  setStatus('正在保存 GPT-SoVITS 配置...');
+  try {
+    await fetchJson('/api/onboarding/tts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tts_type: 'tts_gpt_sovits',
+        provider_key: el.ttsGptSovitsKey.value.trim(),
+        base_url: el.ttsGptSovitsBaseUrl.value.trim(),
+        tts_voice: el.ttsGptSovitsVoice.value.trim(),
+        ref_audio_path: el.ttsGptSovitsRefAudio.value.trim() || undefined,
+        timeout_sec: Number(el.ttsGptSovitsTimeout.value) || 120
+      })
+    });
+    setStatus('GPT-SoVITS 配置已保存');
+    switchStep(3);
+  } catch (err) {
+    setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
+  }
+}
+
+async function saveEdgeTts() {
+  setStatus('正在保存 Edge TTS 配置...');
+  try {
+    await fetchJson('/api/onboarding/tts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tts_type: 'tts_edge',
+        provider_key: el.ttsEdgeKey.value.trim(),
+        tts_voice: el.ttsEdgeVoice.value.trim(),
+        rate: el.ttsEdgeRate.value.trim(),
+        pitch: el.ttsEdgePitch.value.trim(),
+        volume: el.ttsEdgeVolume.value.trim()
+      })
+    });
+    setStatus('Edge TTS 配置已保存');
+    switchStep(3);
+  } catch (err) {
+    setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
+  }
+}
+
+async function saveWindowsTts() {
+  setStatus('正在保存 Windows SAPI 配置...');
+  try {
+    await fetchJson('/api/onboarding/tts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tts_type: 'tts_windows',
+        provider_key: el.ttsWindowsKey.value.trim(),
+        tts_voice: el.ttsWindowsVoice.value.trim() || undefined,
+        rate: Number(el.ttsWindowsRate.value) || 0,
+        volume: Number(el.ttsWindowsVolume.value) || 100
+      })
+    });
+    setStatus('Windows SAPI 配置已保存');
+    switchStep(3);
+  } catch (err) {
+    setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 3: Preferences                                               */
+/* ------------------------------------------------------------------ */
 
 async function savePreferences() {
   setStatus('正在保存偏好...');
@@ -203,10 +378,6 @@ async function savePreferences() {
           mode: el.prefPersonaMode.value,
           max_context_chars: Number(el.prefMaxContextChars.value) || 1500
         },
-        skills: {
-          workspace: el.prefSkillsWorkspace.checked,
-          global: el.prefSkillsGlobal.checked
-        },
         desktop_live2d: {
           voice_transport: el.prefDesktopVoiceTransport.value
         }
@@ -223,9 +394,7 @@ async function completeOnboarding() {
   try {
     await fetchJson('/api/onboarding/complete', { method: 'POST' });
     setStatus('配置完成，正在进入主界面...');
-    setTimeout(() => {
-      window.location.href = '/';
-    }, 500);
+    setTimeout(() => { window.location.href = '/'; }, 500);
   } catch (err) {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
   }
@@ -236,13 +405,15 @@ async function skipOnboarding() {
   try {
     await fetchJson('/api/onboarding/skip', { method: 'POST' });
     setStatus('已跳过 onboarding，稍后可重新打开。');
-    setTimeout(() => {
-      window.location.href = '/';
-    }, 500);
+    setTimeout(() => { window.location.href = '/'; }, 500);
   } catch (err) {
     setStatus(`[${err.code || 'ERROR'}] ${err.message}`, true);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Reference audio helpers (DashScope only)                          */
+/* ------------------------------------------------------------------ */
 
 async function initReferenceAudioInfo() {
   try {
@@ -251,11 +422,15 @@ async function initReferenceAudioInfo() {
     state.referenceAudioUserPath = String(data.user_path || '');
     state.referenceAudioUserDir = String(data.user_dir || '');
 
-    const pathText = state.referenceAudioUserPath || String(data.bundled_path || '') || '未找到';
+    const pathText = state.referenceAudioUserPath || '未找到';
     el.referenceAudioPath.textContent = pathText;
-    if (data.bundled_url) {
-      el.referenceAudioDownloadLink.href = data.bundled_url;
-      el.referenceAudioPreviewLink.href = data.bundled_url;
+
+    // Use first file (preferably the 18s one) for download/preview
+    const files = Array.isArray(data.files) ? data.files : [];
+    const primary = files.find(f => f.name.includes('18s')) || files[0];
+    if (primary?.url) {
+      el.referenceAudioDownloadLink.href = primary.url;
+      el.referenceAudioPreviewLink.href = primary.url;
     }
   } catch (err) {
     el.referenceAudioPath.textContent = `获取失败: ${err.message || String(err)}`;
@@ -264,45 +439,64 @@ async function initReferenceAudioInfo() {
 
 async function openReferenceAudioDir() {
   const target = state.referenceAudioUserDir;
-  if (!target) {
-    setStatus('参考音频目录不可用', true);
-    return;
-  }
-
-  const openPath = window.desktopRuntime && typeof window.desktopRuntime.openPath === 'function'
-    ? window.desktopRuntime.openPath
-    : null;
-  if (!openPath) {
-    setStatus(`请手动打开目录: ${target}`, true);
-    return;
-  }
-
+  if (!target) { setStatus('参考音频目录不可用', true); return; }
+  const openPath = window.desktopRuntime?.openPath || null;
+  if (!openPath) { setStatus(`请手动打开目录: ${target}`, true); return; }
   const result = await openPath(target);
-  if (!result?.ok) {
-    setStatus(`打开目录失败: ${result?.error || 'unknown error'}`, true);
-    return;
-  }
+  if (!result?.ok) { setStatus(`打开目录失败: ${result?.error || 'unknown error'}`, true); return; }
   setStatus('已打开参考音频目录');
 }
 
 async function copyReferenceAudioPath() {
   const target = state.referenceAudioUserPath || el.referenceAudioPath.textContent || '';
-  if (!target) {
-    setStatus('没有可复制的路径', true);
-    return;
-  }
+  if (!target) { setStatus('没有可复制的路径', true); return; }
   try {
     await navigator.clipboard.writeText(target);
     setStatus('参考音频路径已复制');
-  } catch {
-    setStatus('复制失败，请手动复制', true);
-  }
+  } catch { setStatus('复制失败，请手动复制', true); }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Init                                                              */
+/* ------------------------------------------------------------------ */
 
 async function init() {
   initTheme();
   await initReferenceAudioInfo();
 
+  // LLM type toggle
+  document.querySelectorAll('input[name="llmType"]').forEach(radio => {
+    radio.addEventListener('change', switchLlmType);
+  });
+
+  // TTS type toggle
+  document.querySelectorAll('input[name="ttsType"]').forEach(radio => {
+    radio.addEventListener('change', switchTtsType);
+  });
+
+  // Step 1
+  el.saveProviderBtn.addEventListener('click', saveProvider);
+
+  // Step 2 — DashScope
+  el.dashscopeCloneBtn.addEventListener('click', saveDashscopeClone);
+  el.dashscopeSaveManualBtn.addEventListener('click', saveDashscopeManual);
+  el.openReferenceAudioDirBtn.addEventListener('click', openReferenceAudioDir);
+  el.copyReferenceAudioPathBtn.addEventListener('click', copyReferenceAudioPath);
+
+  // Step 2 — other TTS providers
+  el.gptSovitsSaveBtn.addEventListener('click', saveGptSovits);
+  el.edgeSaveBtn.addEventListener('click', saveEdgeTts);
+  el.windowsSaveBtn.addEventListener('click', saveWindowsTts);
+
+  el.backToStep1Btn.addEventListener('click', () => switchStep(1));
+
+  // Step 3
+  el.savePrefsBtn.addEventListener('click', savePreferences);
+  el.backToStep2Btn.addEventListener('click', () => switchStep(2));
+  el.completeBtn.addEventListener('click', completeOnboarding);
+  el.skipBtn.addEventListener('click', skipOnboarding);
+
+  // Check onboarding state
   try {
     const stateResp = await fetchJson('/api/onboarding/state');
     if (stateResp?.data?.done && !state.forceOpen) {
@@ -320,17 +514,6 @@ async function init() {
   } catch {
     // keep default step
   }
-
-  el.saveProviderBtn.addEventListener('click', saveProvider);
-  el.voiceCloneBtn.addEventListener('click', cloneVoice);
-  el.openReferenceAudioDirBtn.addEventListener('click', openReferenceAudioDir);
-  el.copyReferenceAudioPathBtn.addEventListener('click', copyReferenceAudioPath);
-  el.voiceSaveManualBtn.addEventListener('click', saveManualVoiceId);
-  el.backToStep1Btn.addEventListener('click', () => switchStep(1));
-  el.backToStep2Btn.addEventListener('click', () => switchStep(2));
-  el.savePrefsBtn.addEventListener('click', savePreferences);
-  el.completeBtn.addEventListener('click', completeOnboarding);
-  el.skipBtn.addEventListener('click', skipOnboarding);
 }
 
 void init();

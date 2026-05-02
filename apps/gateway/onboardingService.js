@@ -12,11 +12,19 @@ const { OnboardingError } = require('./voiceCloneService');
 
 const ONBOARDING_STATE_VERSION = 1;
 const DEFAULT_LLM_PROVIDER_TYPE = 'openai_compatible';
-const DEFAULT_TIMEOUT_MS = 20000;
+const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_LLM_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_TTS_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const DEFAULT_NORMAL_MODEL = 'qwen3-tts-vc-2026-01-22';
 const DEFAULT_REALTIME_MODEL = 'qwen3-tts-vc-realtime-2026-01-15';
+
+/* TTS provider default voice_output_language mapping */
+const TTS_DEFAULT_VOICE_LANG = {
+  tts_dashscope: 'jp',
+  tts_gpt_sovits: 'jp',
+  tts_edge: 'jp',
+  tts_windows: 'zh'
+};
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -107,11 +115,34 @@ async function markOnboardingCompleted(options = {}) {
   return writeOnboardingState(next);
 }
 
-function buildLlmProviderPayload(providerInput = {}) {
+/* ================================================================== */
+/*  LLM Provider                                                      */
+/* ================================================================== */
+
+function buildLlmProviderPayload(providerInput = {}, providerType) {
+  const type = String(providerType || DEFAULT_LLM_PROVIDER_TYPE).trim();
   const key = String(providerInput.key || providerInput.provider_key || 'qwen35_plus').trim();
   if (!key) {
     throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', 'provider key is required');
   }
+
+  // Ollama / qwen35 type — no API key required, but use openai_compatible type
+  // since Ollama exposes an OpenAI-compatible HTTP API
+  if (type === 'qwen35') {
+    return {
+      key,
+      config: {
+        type: 'openai_compatible',
+        display_name: String(providerInput.display_name || key).trim() || key,
+        base_url: String(providerInput.base_url || 'http://localhost:11434/v1').trim(),
+        model: String(providerInput.model || 'qwen2.5:7b').trim(),
+        timeout_ms: Math.round(parsePositiveNumber(providerInput.timeout_ms, DEFAULT_TIMEOUT_MS)),
+        api_key_env: String(providerInput.api_key_env || 'ollama').trim()
+      }
+    };
+  }
+
+  // OpenAI compatible
   const apiKey = String(providerInput.api_key || '').trim();
   const apiKeyEnv = String(providerInput.api_key_env || '').trim();
   if (!apiKey && !apiKeyEnv) {
@@ -120,7 +151,7 @@ function buildLlmProviderPayload(providerInput = {}) {
   return {
     key,
     config: {
-      type: DEFAULT_LLM_PROVIDER_TYPE,
+      type: 'openai_compatible',
       display_name: String(providerInput.display_name || key).trim() || key,
       base_url: String(providerInput.base_url || DEFAULT_LLM_BASE_URL).trim() || DEFAULT_LLM_BASE_URL,
       model: String(providerInput.model || 'qwen3.5-plus').trim() || 'qwen3.5-plus',
@@ -131,8 +162,8 @@ function buildLlmProviderPayload(providerInput = {}) {
   };
 }
 
-function saveLlmProvider({ providerStore, providerInput, activeProvider }) {
-  const payload = buildLlmProviderPayload(providerInput);
+function saveLlmProvider({ providerStore, providerInput, activeProvider, providerType }) {
+  const payload = buildLlmProviderPayload(providerInput, providerType);
   const current = providerStore.load();
   const next = {
     ...current,
@@ -145,6 +176,121 @@ function saveLlmProvider({ providerStore, providerInput, activeProvider }) {
   providerStore.save(next);
   return providerStore.load();
 }
+
+/* ================================================================== */
+/*  TTS Provider — generic save                                       */
+/* ================================================================== */
+
+/**
+ * Save any TTS provider config to providers.yaml and set active_tts_provider.
+ *
+ * @param {object} opts
+ * @param {object} opts.providerStore
+ * @param {string} opts.ttsType — tts_dashscope | tts_gpt_sovits | tts_edge | tts_windows
+ * @param {string} opts.providerKey — key in providers map
+ * @param {object} opts.input — provider-specific fields (see switch below)
+ * @returns {object} the updated providers config
+ */
+function saveTtsProvider({ providerStore, ttsType, providerKey, input = {} }) {
+  if (!providerKey) {
+    throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', 'provider_key is required');
+  }
+
+  const current = providerStore.load();
+  const providers = { ...(current.providers || {}) };
+  const voiceLang = TTS_DEFAULT_VOICE_LANG[ttsType] || 'zh';
+
+  switch (ttsType) {
+    case 'tts_dashscope': {
+      const existing = isPlainObject(providers[providerKey]) ? providers[providerKey] : {};
+      const apiKey = String(input.api_key || '').trim();
+      const apiKeyEnv = String(input.api_key_env || '').trim();
+      if (!apiKey && !apiKeyEnv) {
+        throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', 'api_key or api_key_env is required');
+      }
+
+      const targetMode = String(input.target_mode || 'normal').trim().toLowerCase();
+      const voiceId = String(input.voice_id || '').trim();
+
+      const config = {
+        type: 'tts_dashscope',
+        display_name: String(existing.display_name || 'Qwen3 TTS VC'),
+        base_url: String(input.base_url || existing.base_url || DEFAULT_TTS_BASE_URL).trim(),
+        timeout_ms: Math.round(parsePositiveNumber(existing.timeout_ms, 60000)),
+        tts_model: targetMode === 'realtime' ? DEFAULT_REALTIME_MODEL : DEFAULT_NORMAL_MODEL,
+        tts_voice: voiceId || String(existing.tts_voice || '').trim(),
+        voice_output_language: voiceLang
+      };
+
+      if (targetMode === 'realtime') {
+        config.tts_realtime_model = DEFAULT_REALTIME_MODEL;
+        config.tts_realtime_voice = voiceId || String(existing.tts_realtime_voice || '').trim();
+      }
+
+      if (apiKey) { config.api_key = apiKey; delete config.api_key_env; }
+      else { config.api_key_env = apiKeyEnv; delete config.api_key; }
+
+      if (!config.tts_voice) {
+        throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', 'tts_voice (voice_id) is required');
+      }
+
+      providers[providerKey] = config;
+      break;
+    }
+
+    case 'tts_gpt_sovits': {
+      providers[providerKey] = {
+        type: 'tts_gpt_sovits',
+        base_url: String(input.base_url || 'http://127.0.0.1:9880').trim(),
+        tts_voice: String(input.tts_voice || 'default').trim(),
+        tts_language: 'auto',
+        voice_output_language: voiceLang,
+        timeout_sec: Math.round(parsePositiveNumber(input.timeout_sec, 120)),
+        ...(input.ref_audio_path ? { ref_audio_path: String(input.ref_audio_path).trim() } : {})
+      };
+      break;
+    }
+
+    case 'tts_edge': {
+      providers[providerKey] = {
+        type: 'tts_edge',
+        tts_voice: String(input.tts_voice || 'zh-CN-XiaoxiaoNeural').trim(),
+        voice_output_language: voiceLang,
+        rate: String(input.rate || '+0%').trim(),
+        pitch: String(input.pitch || '+0Hz').trim(),
+        volume: String(input.volume || '+0%').trim(),
+        output_format: 'audio-24khz-48kbitrate-mono-mp3'
+      };
+      break;
+    }
+
+    case 'tts_windows': {
+      providers[providerKey] = {
+        type: 'tts_windows',
+        tts_voice: String(input.tts_voice || '').trim(),
+        voice_output_language: voiceLang,
+        rate: Math.max(-10, Math.min(10, Math.round(Number(input.rate || 0)))),
+        volume: Math.max(0, Math.min(100, Math.round(Number(input.volume || 100))))
+      };
+      break;
+    }
+
+    default:
+      throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', `unsupported tts_type: ${ttsType}`);
+  }
+
+  providerStore.save({
+    ...current,
+    providers,
+    active_tts_provider: providerKey
+  });
+
+  return providerStore.load();
+}
+
+/* ================================================================== */
+/*  Legacy DashScope voice-clone path (still used by /voice/clone)    */
+/* ================================================================== */
 
 function saveTtsProviderFromVoiceClone({
   providerStore,
@@ -165,7 +311,8 @@ function saveTtsProviderFromVoiceClone({
     base_url: String(ttsBaseUrl || existing.base_url || DEFAULT_TTS_BASE_URL),
     timeout_ms: Math.round(parsePositiveNumber(existing.timeout_ms, 60000)),
     tts_model: String(existing.tts_model || DEFAULT_NORMAL_MODEL),
-    tts_voice: String(existing.tts_voice || voiceId || '').trim()
+    tts_voice: String(existing.tts_voice || voiceId || '').trim(),
+    voice_output_language: TTS_DEFAULT_VOICE_LANG.tts_dashscope
   };
 
   if (!nextTts.tts_voice) {
@@ -193,11 +340,16 @@ function saveTtsProviderFromVoiceClone({
   providers.qwen3_tts = nextTts;
   providerStore.save({
     ...current,
-    providers
+    providers,
+    active_tts_provider: 'qwen3_tts'
   });
 
   return providerStore.load();
 }
+
+/* ================================================================== */
+/*  Preferences                                                       */
+/* ================================================================== */
 
 function mergeVoicePolicyRaw(rawYaml, voicePolicyInput = {}) {
   const parsed = YAML.parse(String(rawYaml || '')) || {};
@@ -255,30 +407,6 @@ function mergePersonaRaw(rawYaml, personaInput = {}) {
   return YAML.stringify(next);
 }
 
-function mergeSkillsRaw(rawYaml, skillsInput = {}) {
-  const parsed = YAML.parse(String(rawYaml || '')) || {};
-  if (!isPlainObject(parsed)) {
-    throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', 'skills.yaml root must be object');
-  }
-  const load = isPlainObject(parsed.load) ? parsed.load : {};
-  const trigger = isPlainObject(parsed.trigger) ? parsed.trigger : {};
-  const next = {
-    ...parsed,
-    load: {
-      ...load,
-      ...(skillsInput.workspace !== undefined ? { workspace: parseBoolean(skillsInput.workspace, true) } : {}),
-      ...(skillsInput.global !== undefined ? { global: parseBoolean(skillsInput.global, true) } : {})
-    },
-    trigger: {
-      ...trigger,
-      ...(skillsInput.max_selected_per_turn !== undefined
-        ? { maxSelectedPerTurn: Math.round(parsePositiveNumber(skillsInput.max_selected_per_turn, trigger.maxSelectedPerTurn || 2)) }
-        : {})
-    }
-  };
-  return YAML.stringify(next);
-}
-
 function mergeDesktopLive2dRaw(rawJson, desktopLive2dInput = {}) {
   const parsed = parseJsonWithComments(String(rawJson || '')) || {};
   if (!isPlainObject(parsed)) {
@@ -287,9 +415,7 @@ function mergeDesktopLive2dRaw(rawJson, desktopLive2dInput = {}) {
   const voice = isPlainObject(parsed.voice) ? parsed.voice : {};
   const next = {
     ...parsed,
-    voice: {
-      ...voice
-    }
+    voice: { ...voice }
   };
 
   if (desktopLive2dInput.voice_transport !== undefined) {
@@ -342,15 +468,41 @@ function saveOnboardingPreferences({
   }
 }
 
+function mergeSkillsRaw(rawYaml, skillsInput = {}) {
+  const parsed = YAML.parse(String(rawYaml || '')) || {};
+  if (!isPlainObject(parsed)) {
+    throw new OnboardingError('ONBOARDING_CONFIG_SAVE_FAILED', 'skills.yaml root must be object');
+  }
+  const load = isPlainObject(parsed.load) ? parsed.load : {};
+  const trigger = isPlainObject(parsed.trigger) ? parsed.trigger : {};
+  const next = {
+    ...parsed,
+    load: {
+      ...load,
+      ...(skillsInput.workspace !== undefined ? { workspace: parseBoolean(skillsInput.workspace, true) } : {}),
+      ...(skillsInput.global !== undefined ? { global: parseBoolean(skillsInput.global, true) } : {})
+    },
+    trigger: {
+      ...trigger,
+      ...(skillsInput.max_selected_per_turn !== undefined
+        ? { maxSelectedPerTurn: Math.round(parsePositiveNumber(skillsInput.max_selected_per_turn, trigger.maxSelectedPerTurn || 2)) }
+        : {})
+    }
+  };
+  return YAML.stringify(next);
+}
+
 module.exports = {
   DEFAULT_LLM_BASE_URL,
   DEFAULT_TTS_BASE_URL,
   DEFAULT_NORMAL_MODEL,
   DEFAULT_REALTIME_MODEL,
+  TTS_DEFAULT_VOICE_LANG,
   readOnboardingState,
   markOnboardingStep,
   markOnboardingCompleted,
   saveLlmProvider,
+  saveTtsProvider,
   saveTtsProviderFromVoiceClone,
   saveOnboardingPreferences
 };

@@ -12,73 +12,154 @@
     <header class="onboarding-header panel">
       <div class="onboarding-headline">
         <h1>初次配置向导</h1>
-        <p>完成 LLM、语音与偏好配置后即可开始使用。</p>
+        <p>完成 LLM、TTS 语音与偏好配置后即可开始使用。</p>
         <div class="actions compact">
           <button id="skipBtn" class="btn" type="button">跳过配置，稍后再说</button>
         </div>
       </div>
       <div class="onboarding-steps" role="tablist" aria-label="onboarding steps">
         <span id="stepMark1" class="step-mark active">1. LLM</span>
-        <span id="stepMark2" class="step-mark">2. 语音克隆</span>
+        <span id="stepMark2" class="step-mark">2. TTS 语音</span>
         <span id="stepMark3" class="step-mark">3. 偏好</span>
       </div>
     </header>
 
+    <!-- ====== Step 1: LLM Provider ====== -->
     <section id="step1" class="panel">
       <h2>Step 1: LLM Provider</h2>
-      <div class="grid">
+      <fieldset class="mode-switch">
+        <legend>Provider 类型</legend>
+        <label class="radio-row"><input type="radio" name="llmType" value="openai_compatible" checked /> OpenAI Compatible (DashScope / OpenAI / 自定义)</label>
+        <label class="radio-row"><input type="radio" name="llmType" value="ollama" /> Ollama (本地)</label>
+      </fieldset>
+
+      <!-- OpenAI Compatible -->
+      <div id="llmOpenaiFields" class="grid">
         <label>Provider Key <input id="llmKey" value="qwen35_plus" /></label>
         <label>Display Name <input id="llmDisplayName" value="Qwen 3.5 Plus" /></label>
         <label>Base URL <input id="llmBaseUrl" value="https://dashscope.aliyuncs.com/compatible-mode/v1" /></label>
         <label>Model <input id="llmModel" value="qwen3.5-plus" /></label>
-        <label>API Key <input id="llmApiKey" type="password" /></label>
-        <label>Timeout (ms) <input id="llmTimeoutMs" type="number" value="20000" /></label>
+        <label>API Key <input id="llmApiKey" type="password" placeholder="或留空使用 api_key_env" /></label>
+        <label>API Key 环境变量名 <input id="llmApiKeyEnv" placeholder="如 DASHSCOPE_API_KEY" /></label>
+        <label>Timeout (ms) <input id="llmTimeoutMs" type="number" value="60000" /></label>
       </div>
+
+      <!-- Ollama -->
+      <div id="llmOllamaFields" class="grid hidden">
+        <label>Provider Key <input id="ollamaKey" value="ollama_local" /></label>
+        <label>Display Name <input id="ollamaDisplayName" value="Ollama Local" /></label>
+        <label>Base URL <input id="ollamaBaseUrl" value="http://localhost:11434/v1" /></label>
+        <label>Model <input id="ollamaModel" value="qwen2.5:7b" /></label>
+        <label>Timeout (ms) <input id="ollamaTimeoutMs" type="number" value="60000" /></label>
+        <span class="hint" style="grid-column: 1/-1">Ollama 无需 API Key，类型将自动设为 qwen35。</span>
+      </div>
+
       <div class="actions">
         <button id="saveProviderBtn" class="btn btn-primary">保存并下一步</button>
       </div>
     </section>
 
+    <!-- ====== Step 2: TTS Provider ====== -->
     <section id="step2" class="panel hidden">
-      <h2>Step 2: 声线克隆 + TTS</h2>
-      <div class="grid">
-        <label>百炼 API Key <input id="ttsApiKey" type="password" /></label>
-        <label>TTS Base URL <input id="ttsBaseUrl" value="https://dashscope.aliyuncs.com/api/v1" /></label>
-      </div>
+      <h2>Step 2: TTS 语音</h2>
       <fieldset class="mode-switch">
-        <legend>TTS 模式</legend>
-        <label class="radio-row"><input type="radio" name="ttsMode" value="normal" checked /> 普通 tts-vc</label>
-        <label class="radio-row"><input type="radio" name="ttsMode" value="realtime" /> 实时 tts-vc-realtime</label>
+        <legend>TTS Provider</legend>
+        <label class="radio-row"><input type="radio" name="ttsType" value="tts_dashscope" /> DashScope (阿里云百炼，需声线克隆)</label>
+        <label class="radio-row"><input type="radio" name="ttsType" value="tts_gpt_sovits" /> GPT-SoVITS (自托管)</label>
+        <label class="radio-row"><input type="radio" name="ttsType" value="tts_edge" /> Edge TTS (微软，免费无需 API Key)</label>
+        <label class="radio-row"><input type="radio" name="ttsType" value="tts_windows" /> Windows SAPI (离线，无需网络)</label>
       </fieldset>
-      <div class="reference-audio panel-soft">
-        <div class="reference-audio-head">
-          <strong>推荐参考音频</strong>
-          <span class="hint">安装包已内置，建议直接使用。</span>
+
+      <!-- DashScope TTS -->
+      <div id="ttsDashscopeFields" class="tts-fields">
+        <div class="grid">
+          <label>Provider Key <input id="ttsDashscopeKey" value="qwen3_tts" /></label>
+          <label>百炼 API Key <input id="ttsDashscopeApiKey" type="password" placeholder="或留空使用环境变量" /></label>
+          <label>API Key 环境变量名 <input id="ttsDashscopeApiKeyEnv" placeholder="如 DASHSCOPE_API_KEY" /></label>
+          <label>Base URL <input id="ttsDashscopeBaseUrl" value="https://dashscope.aliyuncs.com/api/v1" /></label>
         </div>
-        <div class="reference-audio-path" id="referenceAudioPath">加载中...</div>
-        <div class="actions compact">
-          <button id="openReferenceAudioDirBtn" class="btn" type="button">打开所在目录</button>
-          <button id="copyReferenceAudioPathBtn" class="btn" type="button">复制路径</button>
-          <a id="referenceAudioDownloadLink" class="btn" href="/assets/reference/yachiyo_voice_ref_clone_18s.mp3" download>下载音频</a>
-          <a id="referenceAudioPreviewLink" class="btn" href="/assets/reference/yachiyo_voice_ref_clone_18s.mp3" target="_blank" rel="noreferrer">试听</a>
+        <fieldset class="mode-switch">
+          <legend>TTS 模式</legend>
+          <label class="radio-row"><input type="radio" name="dashscopeMode" value="normal" checked /> 普通 tts-vc</label>
+          <label class="radio-row"><input type="radio" name="dashscopeMode" value="realtime" /> 实时 tts-vc-realtime</label>
+        </fieldset>
+        <div class="reference-audio panel-soft">
+          <div class="reference-audio-head">
+            <strong>推荐参考音频</strong>
+            <span class="hint">安装包已内置，建议直接使用。</span>
+          </div>
+          <div class="reference-audio-path" id="referenceAudioPath">加载中...</div>
+          <div class="actions compact">
+            <button id="openReferenceAudioDirBtn" class="btn" type="button">打开所在目录</button>
+            <button id="copyReferenceAudioPathBtn" class="btn" type="button">复制路径</button>
+            <a id="referenceAudioDownloadLink" class="btn" href="#" download>下载音频</a>
+            <a id="referenceAudioPreviewLink" class="btn" href="#" target="_blank" rel="noreferrer">试听</a>
+          </div>
+        </div>
+        <div class="grid">
+          <label>Preferred Name <input id="voicePreferredName" value="yachiyo" /></label>
+          <label>手动 Voice ID（可选）<input id="voiceManualId" placeholder="可跳过克隆直接填写" /></label>
+        </div>
+        <div class="grid">
+          <label>参考音频（wav/mp3/m4a）
+            <input id="voiceAudioFile" type="file" accept=".wav,.mp3,.m4a,audio/*" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="dashscopeCloneBtn" class="btn btn-primary">上传并克隆</button>
+          <button id="dashscopeSaveManualBtn" class="btn">仅保存手动 Voice ID</button>
         </div>
       </div>
-      <div class="grid">
-        <label>Preferred Name <input id="voicePreferredName" value="yachiyo" /></label>
-        <label>手动 Voice ID（可选）<input id="voiceManualId" placeholder="可跳过克隆直接填写" /></label>
+
+      <!-- GPT-SoVITS -->
+      <div id="ttsGptSovitsFields" class="tts-fields hidden">
+        <div class="grid">
+          <label>Provider Key <input id="ttsGptSovitsKey" value="gpt_sovits_1" /></label>
+          <label>Base URL <input id="ttsGptSovitsBaseUrl" value="http://127.0.0.1:9880" /></label>
+          <label>TTS Voice <input id="ttsGptSovitsVoice" value="default" /></label>
+          <label>Ref Audio Path <input id="ttsGptSovitsRefAudio" placeholder="参考音频路径（可选）" /></label>
+          <label>Timeout (sec) <input id="ttsGptSovitsTimeout" type="number" value="120" /></label>
+        </div>
+        <div class="actions">
+          <button id="gptSovitsSaveBtn" class="btn btn-primary">保存 GPT-SoVITS 配置</button>
+        </div>
       </div>
-      <div class="grid">
-        <label>参考音频（wav/mp3/m4a）
-          <input id="voiceAudioFile" type="file" accept=".wav,.mp3,.m4a,audio/*" />
-        </label>
+
+      <!-- Edge TTS -->
+      <div id="ttsEdgeFields" class="tts-fields hidden">
+        <div class="grid">
+          <label>Provider Key <input id="ttsEdgeKey" value="edge_tts" /></label>
+          <label>Voice <input id="ttsEdgeVoice" value="zh-CN-XiaoxiaoNeural" /></label>
+          <label>语速 <input id="ttsEdgeRate" value="+0%" /></label>
+          <label>音调 <input id="ttsEdgePitch" value="+0Hz" /></label>
+          <label>音量 <input id="ttsEdgeVolume" value="+0%" /></label>
+        </div>
+        <span class="hint" style="margin-top:8px;display:block">Edge TTS 免费使用，无需 API Key。需要能访问微软语音服务（中国大陆可能需要 VPN）。</span>
+        <div class="actions">
+          <button id="edgeSaveBtn" class="btn btn-primary">保存 Edge TTS 配置</button>
+        </div>
       </div>
-      <div class="actions">
-        <button id="voiceCloneBtn" class="btn btn-primary">上传并克隆</button>
-        <button id="voiceSaveManualBtn" class="btn">仅保存手动 Voice ID</button>
+
+      <!-- Windows SAPI -->
+      <div id="ttsWindowsFields" class="tts-fields hidden">
+        <div class="grid">
+          <label>Provider Key <input id="ttsWindowsKey" value="windows_tts" /></label>
+          <label>Voice <input id="ttsWindowsVoice" value="" placeholder="如 Microsoft Huihui Desktop" /></label>
+          <label>语速 (-10 ~ 10) <input id="ttsWindowsRate" type="number" value="0" min="-10" max="10" /></label>
+          <label>音量 (0 ~ 100) <input id="ttsWindowsVolume" type="number" value="100" min="0" max="100" /></label>
+        </div>
+        <span class="hint" style="margin-top:8px;display:block">Windows SAPI 完全离线，无需网络连接。留空 Voice 将使用系统默认语音。</span>
+        <div class="actions">
+          <button id="windowsSaveBtn" class="btn btn-primary">保存 Windows SAPI 配置</button>
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top:14px">
         <button id="backToStep1Btn" class="btn">上一步</button>
       </div>
     </section>
 
+    <!-- ====== Step 3: Preferences ====== -->
     <section id="step3" class="panel hidden">
       <h2>Step 3: 基础偏好</h2>
       <div class="grid">
@@ -95,11 +176,9 @@
           </select>
         </label>
         <label>max context chars <input id="prefMaxContextChars" type="number" value="1500" /></label>
-        <label>workspace skills <input id="prefSkillsWorkspace" type="checkbox" checked /></label>
-        <label>global skills <input id="prefSkillsGlobal" type="checkbox" checked /></label>
         <label>desktop voice transport
           <select id="prefDesktopVoiceTransport">
-            <option value="realtime" selected>realtime (default)</option>
+            <option value="realtime" selected>realtime</option>
             <option value="non_streaming">non_streaming</option>
           </select>
         </label>
