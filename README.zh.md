@@ -2,7 +2,7 @@
 
 ![open-yachiyo cover](assets/readme-cover.png)
 
-> **Fork 自** [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) | 版本：`0.1.2-fork.wuming`
+> **Fork 自** [sdyzjx/open-yachiyo](https://github.com/sdyzjx/open-yachiyo) | 版本：`0.1.3-fork.wuming`
 
 AI Native 的 **Agentic 桌面宠物** 运行时，核心是**可控 ReAct 循环**。
 
