@@ -1,6 +1,6 @@
 {
   "name": "open-yachiyo",
-  "version": "0.1.2-fork.wuming",
+  "version": "0.1.3-fork.wuming",
   "private": true,
   "main": "apps/desktop-live2d/main/electronMain.js",
   "type": "commonjs",
